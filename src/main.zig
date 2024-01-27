@@ -1,6 +1,11 @@
 const std = @import("std");
+const sd = @import("simd_sample.zig");
 
 const Allocator = std.mem.Allocator;
+
+// export fn _start() callconv(.C) noreturn {
+//     try @call(.auto, main, .{});
+// }
 
 pub fn main() !void {
     // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
@@ -28,6 +33,11 @@ pub fn main() !void {
     }
 
     std.debug.print("list: {any}\n", .{list.terms[0..list.pos]});
+    std.debug.print("list.add type: {any}\n", .{@typeInfo(@TypeOf(IntList))});
+
+    sd.simdSample();
+
+    typeSample();
 }
 
 test "simple test" {
@@ -37,7 +47,7 @@ test "simple test" {
     try std.testing.expectEqual(@as(i32, 42), list.pop());
 }
 
-pub const IntList = struct {
+const IntList = struct {
     pos: usize,
     terms: []i64,
     allocator: Allocator,
@@ -92,4 +102,31 @@ test "IntList: add" {
     try testing.expectEqual(@as(i64, 12), list.terms[2]);
     try testing.expectEqual(@as(i64, 13), list.terms[3]);
     try testing.expectEqual(@as(i64, 14), list.terms[4]);
+}
+
+fn typeSample() void {
+    const i: u32 = 2;
+
+    const T = getEnumType(i);
+    std.debug.print("enum type = {any}\n", .{T});
+}
+
+const SchoolType = enum {
+    little,
+    low_middle,
+    high_middle,
+};
+
+const EmpoleeType = enum {
+    sales,
+    engineer,
+    manager,
+};
+
+fn getEnumType(comptime i: u32) type {
+    if (i == 1) {
+        return SchoolType;
+    } else {
+        return EmpoleeType;
+    }
 }
