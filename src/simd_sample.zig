@@ -1,5 +1,6 @@
 const std = @import("std");
 const target = @import("builtin").target;
+const hvx = @import("hexagon-vec.zig");
 const arch = target.cpu.arch;
 
 pub const I64x2 = @Vector(2, i64);
@@ -9,23 +10,16 @@ pub const U32x4 = @Vector(4, u32);
 pub const I16x8 = @Vector(8, i16);
 pub const U16x8 = @Vector(8, u16);
 
-const SimdSamples = GetSimdSamples();
+pub const I32x4x4 = @Vector(16, u32);
+pub const U32x4x4 = @Vector(16, u32);
 
-fn GetSimdSamples() type {
-    comptime var T: type = undefined;
+const SimdSamples = switch (arch) {
+    .x86_64 => @import("simd_x86_64.zig").SimdSamples,
+    .aarch64 => @import("simd_aarch64.zig").SimdSamples,
+    else => @import("simd_generic.zig").SimdSamples,
+};
 
-    if (arch == .x86_64) {
-        T = @import("simd_x86_64.zig");
-    } else if (arch == .aarch64) {
-        T = @import("simd_aarch64.zig");
-    } else {
-        T = @import("simd_generic.zig");
-    }
-
-    return T.SimdSamples;
-}
-
-pub fn simdSample() void {
+pub fn simdSample() !void {
     std.debug.print("target: {any}\n", .{target});
     std.debug.print("cpu arch: {any}\n", .{arch});
 
@@ -48,6 +42,8 @@ pub fn simdSample() void {
         },
     }
 
+    std.debug.print("size of HvxVector: {any}, VecI32x32: {d}\n", .{ @sizeOf(hvx.HvxVector), @sizeOf(hvx.VecI32x32) });
+
     var vacc: @Vector(32, u32) = @splat(22);
     const v55: @Vector(32, u32) = @splat(55);
     const vb: @Vector(32, u32) = [_]u32{
@@ -64,7 +60,12 @@ pub fn simdSample() void {
         true, true,  false, true,  false, true,  true,  false,
     };
 
+    var vcat: @Vector(64, u32) = @splat(95);
+    vcat = std.simd.join(vacc, v55);
+    std.debug.print("combine(vacc, v55) = {any}\n", .{vcat});
+
     vacc += vb;
+    std.debug.print("type of vacc: {any}\n", .{@TypeOf(vacc)});
     std.debug.print("vacc + vb = {any}\n", .{vacc});
 
     vacc = @select(u32, mask, vacc, v55);
@@ -74,4 +75,52 @@ pub fn simdSample() void {
     const fb: I16x8 = @splat(32);
     fa = SimdSamples.binOpI16x8(fa, fb);
     std.debug.print("fa = {d}\n", .{fa});
+
+    var arr1: [4]u32 = undefined;
+    var arr2: [4]u32 = undefined;
+    var arr3: [4]u32 = undefined;
+    var arr4: [4]u32 = undefined;
+    var i: usize = 0;
+
+    const stdin = std.io.getStdIn().reader();
+    const stdout = std.io.getStdOut().writer();
+    var bias_str: [8]u8 = undefined;
+    try stdout.print("Please input a bias string:\n", .{});
+    const readed_str = try stdin.readUntilDelimiter(&bias_str, '\n');
+    const bias = try std.fmt.parseInt(u32, readed_str, 10);
+    std.debug.print("User input: {any}\n", .{bias});
+    while (i < arr1.len) : (i += 1) {
+        const a: u32 = @as(u32, @intCast(i)) + bias;
+        arr1[i] = a;
+        arr2[i] = a + 4;
+        arr3[i] = a + 8;
+        arr4[i] = a + 12;
+    }
+    const vecs = [4]@Vector(4, u32){
+        arr1,
+        arr2,
+        arr3,
+        arr4,
+    };
+    if (arch == .aarch64) {
+        const vec4x4 = SimdSamples.transpose4x4U32(vecs);
+        std.debug.print("transposed vec4x4: {any}\n", .{vec4x4});
+    }
+}
+
+pub inline fn combine(vec1: @Vector(32, u32), vec2: @TypeOf(vec1)) @Vector(64, u32) {
+    const T = u32;
+    const N = 32;
+    var pair_arr: [2 * N]T = undefined;
+    var vec_slice: []T = &pair_arr;
+    const vec1_slice: []T = @constCast(@ptrCast(&@as([N]T, @bitCast(vec1))));
+    std.debug.print("vec1_slice: {any}\n", .{vec1_slice});
+    const vec2_slice: []T = @constCast(@ptrCast(&@as([N]T, @bitCast(vec2))));
+    std.debug.print("vec2_slice: {any}\n", .{vec2_slice});
+    @memcpy(vec_slice[0..N], vec1_slice);
+    std.debug.print("vec_slice[0..N]: {any}\n", .{vec_slice});
+    @memcpy(vec_slice[N .. 2 * N], vec2_slice);
+    std.debug.print("vec_slice[N..2*N]: {any}\n", .{vec_slice});
+    var vec_pair: @Vector(64, u32) = pair_arr;
+    return vec_pair;
 }

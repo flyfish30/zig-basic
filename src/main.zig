@@ -35,7 +35,7 @@ pub fn main() !void {
     std.debug.print("list: {any}\n", .{list.terms[0..list.pos]});
     std.debug.print("list.add type: {any}\n", .{@typeInfo(@TypeOf(IntList))});
 
-    sd.simdSample();
+    try sd.simdSample();
 
     typeSample();
 }
