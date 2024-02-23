@@ -1,6 +1,5 @@
 const std = @import("std");
 const target = @import("builtin").target;
-const hvx = @import("hexagon-vec.zig");
 const arch = target.cpu.arch;
 
 pub const I64x2 = @Vector(2, i64);
@@ -12,6 +11,11 @@ pub const U16x8 = @Vector(8, u16);
 
 pub const I32x4x4 = @Vector(16, u32);
 pub const U32x4x4 = @Vector(16, u32);
+
+const LINE_END_DELIM = switch (target.os.tag) {
+    .windows => '\r',
+    else => '\n',
+};
 
 const SimdSamples = switch (arch) {
     .x86_64 => @import("simd_x86_64.zig").SimdSamples,
@@ -41,8 +45,6 @@ pub fn simdSample() !void {
             std.debug.print("the arch of cpu has generic simd supported!\n", .{});
         },
     }
-
-    std.debug.print("size of HvxVector: {any}, VecI32x32: {d}\n", .{ @sizeOf(hvx.HvxVector), @sizeOf(hvx.VecI32x32) });
 
     var vacc: @Vector(32, u32) = @splat(22);
     const v55: @Vector(32, u32) = @splat(55);
@@ -86,7 +88,7 @@ pub fn simdSample() !void {
     const stdout = std.io.getStdOut().writer();
     var bias_str: [8]u8 = undefined;
     try stdout.print("Please input a bias string:\n", .{});
-    const readed_str = try stdin.readUntilDelimiter(&bias_str, '\n');
+    const readed_str = try stdin.readUntilDelimiter(&bias_str, LINE_END_DELIM);
     const bias = try std.fmt.parseInt(u32, readed_str, 10);
     std.debug.print("User input: {any}\n", .{bias});
     while (i < arr1.len) : (i += 1) {
