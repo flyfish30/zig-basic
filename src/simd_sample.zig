@@ -66,6 +66,9 @@ pub fn simdSample() !void {
     vcat = std.simd.join(vacc, v55);
     std.debug.print("combine(vacc, v55) = {any}\n", .{vcat});
 
+    const vbu64: @Vector(32, u64) = @as(@Vector(32, u64), vb);
+    std.debug.print("extend vb is {any}\n", .{vbu64});
+
     vacc += vb;
     std.debug.print("type of vacc: {any}\n", .{@TypeOf(vacc)});
     std.debug.print("vacc + vb = {any}\n", .{vacc});
@@ -78,36 +81,60 @@ pub fn simdSample() !void {
     fa = SimdSamples.binOpI16x8(fa, fb);
     std.debug.print("fa = {d}\n", .{fa});
 
-    var arr1: [4]u32 = undefined;
-    var arr2: [4]u32 = undefined;
-    var arr3: [4]u32 = undefined;
-    var arr4: [4]u32 = undefined;
-    var i: usize = 0;
-
     const stdin = std.io.getStdIn().reader();
     const stdout = std.io.getStdOut().writer();
     var bias_str: [8]u8 = undefined;
     try stdout.print("Please input a bias string:\n", .{});
     const readed_str = try stdin.readUntilDelimiter(&bias_str, LINE_END_DELIM);
     const bias = try std.fmt.parseInt(u32, readed_str, 10);
-    std.debug.print("User input: {any}\n", .{bias});
-    while (i < arr1.len) : (i += 1) {
-        const a: u32 = @as(u32, @intCast(i)) + bias;
-        arr1[i] = a;
-        arr2[i] = a + 4;
-        arr3[i] = a + 8;
-        arr4[i] = a + 12;
-    }
+    std.debug.print("User input: {d}\n", .{bias});
     const vecs = [4]@Vector(4, u32){
-        arr1,
-        arr2,
-        arr3,
-        arr4,
+        std.simd.iota(u32, 4) + @as(@Vector(4, u32), @splat(bias)),
+        std.simd.iota(u32, 4) + @as(@Vector(4, u32), @splat(bias + 4)),
+        std.simd.iota(u32, 4) + @as(@Vector(4, u32), @splat(bias + 8)),
+        std.simd.iota(u32, 4) + @as(@Vector(4, u32), @splat(bias + 12)),
     };
     if (arch == .aarch64) {
         const vec4x4 = SimdSamples.transpose4x4U32(vecs);
         std.debug.print("transposed vec4x4: {any}\n", .{vec4x4});
+    } else {
+        const vec_zipped = transposeVec4x4_zip(@bitCast(vecs));
+
+        // const vec_zipped = std.simd.interlace(vecs);
+        const trn_vec1 = std.simd.extract(vec_zipped, 0, 4);
+        const trn_vec2 = std.simd.extract(vec_zipped, 4, 4);
+        const trn_vec3 = std.simd.extract(vec_zipped, 8, 4);
+        const trn_vec4 = std.simd.extract(vec_zipped, 12, 4);
+        std.debug.print("transposed vec4x4: {any}\n", .{[_]@Vector(4, u32){ trn_vec1, trn_vec2, trn_vec3, trn_vec4 }});
     }
+
+    // transpose 8x8 matrix
+    const vec64u32 = std.simd.iota(u32, 64) + @as(@Vector(64, u32), @splat(bias));
+    {
+        const z3_vecs = transposeVec8x8_zip(vec64u32);
+
+        const vec_t0 = std.simd.extract(z3_vecs, 0, 8);
+        const vec_t1 = std.simd.extract(z3_vecs, 8, 8);
+        const vec_t2 = std.simd.extract(z3_vecs, 16, 8);
+        const vec_t3 = std.simd.extract(z3_vecs, 24, 8);
+        const vec_t4 = std.simd.extract(z3_vecs, 32, 8);
+        const vec_t5 = std.simd.extract(z3_vecs, 40, 8);
+        const vec_t6 = std.simd.extract(z3_vecs, 48, 8);
+        const vec_t7 = std.simd.extract(z3_vecs, 56, 8);
+        std.debug.print("transposed vec8x8: {any}\n", .{[_]@Vector(8, u32){ vec_t0, vec_t1, vec_t2, vec_t3, vec_t4, vec_t5, vec_t6, vec_t7 }});
+    }
+
+    const v16h: @Vector(16, i16) = [_]i16{
+        13, 46,  85, 13688, 72, 82,  -11321, 23,
+        82, -21, 12, 34,    28, -45, 62,     88,
+    };
+    const rt_i16: u32 = (@as(u32, 0xfffd) << 16) | @as(u32, 0xfffa); // (-3, -6) in u32
+    const vmul_i16 = regVecMulS2wI16Even(v16h, rt_i16);
+    std.debug.print("vmul_i16: {any}\n", .{vmul_i16});
+
+    const rt_u16: u32 = (3 << 16) | 8;
+    const vmul_u16 = regVecMulS2wU16Even(v16h, rt_u16);
+    std.debug.print("vmul_u16: {any}\n", .{vmul_u16});
 }
 
 pub inline fn combine(vec1: @Vector(32, u32), vec2: @TypeOf(vec1)) @Vector(64, u32) {
@@ -125,4 +152,92 @@ pub inline fn combine(vec1: @Vector(32, u32), vec2: @TypeOf(vec1)) @Vector(64, u
     std.debug.print("vec_slice[N..2*N]: {any}\n", .{vec_slice});
     var vec_pair: @Vector(64, u32) = pair_arr;
     return vec_pair;
+}
+
+inline fn transposeVec4x4_zip(vecs: @Vector(16, u32)) @Vector(16, u32) {
+    const z0_vec0 = std.simd.extract(vecs, 0, 8);
+    const z0_vec1 = std.simd.extract(vecs, 8, 8);
+    const z1_vecs = std.simd.interlace([_]@Vector(8, u32){ z0_vec0, z0_vec1 });
+
+    const z1_vec0 = std.simd.extract(z1_vecs, 0, 8);
+    const z1_vec1 = std.simd.extract(z1_vecs, 8, 8);
+    const z2_vecs = std.simd.interlace([_]@Vector(8, u32){ z1_vec0, z1_vec1 });
+
+    return z2_vecs;
+}
+
+inline fn transposeVec16x4_zip(vecs: @Vector(64, u32)) @Vector(64, u32) {
+    const z0_vec0 = std.simd.extract(vecs, 0, 32);
+    const z0_vec1 = std.simd.extract(vecs, 32, 32);
+    const z1_vecs = std.simd.interlace([_]@Vector(32, u32){ z0_vec0, z0_vec1 });
+
+    const z1_vec0 = std.simd.extract(z1_vecs, 0, 32);
+    const z1_vec1 = std.simd.extract(z1_vecs, 32, 32);
+    const z2_vecs = std.simd.interlace([_]@Vector(32, u32){ z1_vec0, z1_vec1 });
+
+    return z2_vecs;
+}
+
+inline fn transposeVec8x8_zip(vecs: @Vector(64, u32)) @Vector(64, u32) {
+    const z0_vec0 = std.simd.extract(vecs, 0, 32);
+    const z0_vec1 = std.simd.extract(vecs, 32, 32);
+    const z1_vecs = std.simd.interlace([_]@Vector(32, u32){ z0_vec0, z0_vec1 });
+
+    const z1_vec0 = std.simd.extract(z1_vecs, 0, 32);
+    const z1_vec1 = std.simd.extract(z1_vecs, 32, 32);
+    const z2_vecs = std.simd.interlace([_]@Vector(32, u32){ z1_vec0, z1_vec1 });
+
+    const z2_vec0 = std.simd.extract(z2_vecs, 0, 32);
+    const z2_vec1 = std.simd.extract(z2_vecs, 32, 32);
+    const z3_vecs = std.simd.interlace([_]@Vector(32, u32){ z2_vec0, z2_vec1 });
+
+    return z3_vecs;
+}
+
+fn regVecMulS2wI16Even(vec: @Vector(16, i16), rt: u32) @Vector(8, i32) {
+    const v0v1 = std.simd.deinterlace(2, vec);
+    const rh0: i16 = @bitCast(@as(u16, @truncate(rt)));
+    const rh1: i16 = @bitCast(@as(u16, @truncate(rt >> 16)));
+    const vrh0: @Vector(8, i32) = @splat(@intCast(rh0));
+    const vrh1: @Vector(8, i32) = @splat(@intCast(rh1));
+    std.debug.print("regVecMulS2wI16Even vrh0: {any}\n", .{vrh0});
+    std.debug.print("regVecMulS2wI16Even vrh1: {any}\n", .{vrh1});
+
+    const halfv0 = v0v1[0] * vrh0;
+    const halfv1 = v0v1[1] * vrh1;
+    std.debug.print("regVecMulS2wI16Even halfv0: {any}\n", .{halfv0});
+    std.debug.print("regVecMulS2wI16Even halfv1: {any}\n", .{halfv1});
+    std.debug.print("halfv0 type is {any}\n", .{@TypeOf(halfv0)});
+
+    return halfv0 + halfv1;
+}
+
+fn regVecMulS2wU16Even(vec: @Vector(16, i16), rt: u32) @Vector(8, i32) {
+    const v0v1 = std.simd.deinterlace(2, vec);
+    const rh0: u16 = @as(u16, @truncate(rt));
+    const rh1: u16 = @as(u16, @truncate(rt >> 16));
+    const vrh0: @Vector(8, i32) = @splat(@intCast(rh0));
+    const vrh1: @Vector(8, i32) = @splat(@intCast(rh1));
+    std.debug.print("regVecMulS2wU16Even vrh0: {any}\n", .{vrh0});
+    std.debug.print("regVecMulS2wU16Even vrh1: {any}\n", .{vrh1});
+
+    const halfv0 = v0v1[0] * vrh0;
+    const halfv1 = v0v1[1] * vrh1;
+    std.debug.print("regVecMulS2wU16Even halfv0: {any}\n", .{halfv0});
+    std.debug.print("regVecMulS2wU16Even halfv1: {any}\n", .{halfv1});
+    std.debug.print("halfv0 type is {any}\n", .{@TypeOf(halfv0)});
+
+    return halfv0 + halfv1;
+}
+
+// vec_pair is merged with a vec and itself shift right by 2
+fn regVecMulS2wI16Odd(vec_pair: @Vector(32, i16), rt: u32) @Vector(8, i32) {
+    const vec = std.simd.join(std.simd.extract(vec_pair, 1, 15), std.simd.extract(vec_pair, 30, 1));
+    return regVecMulS2wI16Even(vec, rt);
+}
+
+// vec_pair is merged with a vec and itself shift right by 2
+fn regVecMulS2wU16Odd(vec_pair: @Vector(32, i16), rt: u32) @Vector(8, i32) {
+    const vec = std.simd.join(std.simd.extract(vec_pair, 1, 15), std.simd.extract(vec_pair, 30, 1));
+    return regVecMulS2wU16Even(vec, rt);
 }
