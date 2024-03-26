@@ -1,4 +1,5 @@
 const std = @import("std");
+const zstbi = @import("zstbi.zig");
 const sd = @import("simd_sample.zig");
 
 const Allocator = std.mem.Allocator;
@@ -10,6 +11,10 @@ const Allocator = std.mem.Allocator;
 pub fn main() !void {
     // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
     std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+
+    // for (std.os.argv) |arg| {
+    //     std.debug.print("arg: {s}\n", .{arg});
+    // }
 
     // stdout is for the actual output of your application, for example if you
     // are implementing gzip, then only the compressed bytes should be sent to
@@ -38,6 +43,10 @@ pub fn main() !void {
     try sd.simdSample();
 
     typeSample();
+
+    if (std.os.argv.len > 1) {
+        try readAndProcessImage(std.mem.span(std.os.argv[1]));
+    }
 }
 
 test "simple test" {
@@ -129,4 +138,33 @@ fn getEnumType(comptime i: u32) type {
     } else {
         return EmpoleeType;
     }
+}
+
+fn readAndProcessImage(path: []u8) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    zstbi.init(allocator);
+    defer zstbi.deinit();
+
+    const c_path = try allocator.dupeZ(u8, path);
+    var image = try zstbi.Image.loadFromFile(c_path, 0);
+    defer image.deinit();
+
+    var small_image = zstbi.Image.resize(&image, 480, 270);
+    defer small_image.deinit();
+
+    const dir = if (std.fs.path.dirname(path)) |dir| set_dir: {
+        break :set_dir dir;
+    } else {
+        return error.BadPathName;
+    };
+
+    const base = std.fs.path.basename(path);
+    const index = std.mem.lastIndexOfScalar(u8, base, '.') orelse base.len;
+    const small_base = try std.mem.concat(allocator, u8, &[_][]const u8{ base[0..index], "_small", base[index..] });
+    const small_path = try std.fs.path.joinZ(allocator, &[_][]const u8{ dir, small_base });
+    std.debug.print("small image path: {s}\n", .{small_path});
+
+    try zstbi.Image.writeToFile(small_image, small_path, .{ .jpg = .{ .quality = 95 } });
 }

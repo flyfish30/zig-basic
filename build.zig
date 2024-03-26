@@ -24,6 +24,28 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    exe.addIncludePath(.{ .path = "libs/zstbi/libs/stbi" });
+    if (optimize == .Debug) {
+        // TODO: Workaround for Zig bug.
+        exe.addCSourceFile(.{
+            .file = .{ .path = "libs/zstbi/src/zstbi.c" },
+            .flags = &.{
+                "-std=c99",
+                "-fno-sanitize=undefined",
+                "-g",
+                "-O0",
+            },
+        });
+    } else {
+        exe.addCSourceFile(.{
+            .file = .{ .path = "libs/zstbi/src/zstbi.c" },
+            .flags = &.{
+                "-std=c99",
+                "-fno-sanitize=undefined",
+            },
+        });
+    }
+
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
