@@ -1,6 +1,7 @@
 const std = @import("std");
 const zstbi = @import("zstbi.zig");
 const sd = @import("simd_sample.zig");
+const bisort = @import("bitonic_sort.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -43,6 +44,8 @@ pub fn main() !void {
     try sd.simdSample();
 
     typeSample();
+
+    bitonicSortSample();
 
     if (std.os.argv.len > 1) {
         try readAndProcessImage(std.mem.span(std.os.argv[1]));
@@ -140,6 +143,21 @@ fn getEnumType(comptime i: u32) type {
     }
 }
 
+fn bitonicSortSample() void {
+    const IntType = u8;
+    var prnd = std.rand.DefaultPrng.init(83751737);
+    var array_int: [bisort.VecLen(IntType)]IntType = undefined;
+    for (&array_int) |*a| {
+        a.* = prnd.random().int(IntType);
+    }
+    var vec_int: bisort.VecType(IntType) = array_int;
+    std.debug.print("original vec_int is: {any}\n", .{vec_int});
+
+    vec_int = bisort.bitonicSort1V(IntType, vec_int);
+    std.debug.print("sorted vec_int is: {any}\n", .{vec_int});
+    return;
+}
+
 fn readAndProcessImage(path: []u8) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -164,7 +182,7 @@ fn readAndProcessImage(path: []u8) !void {
     const index = std.mem.lastIndexOfScalar(u8, base, '.') orelse base.len;
     const small_base = try std.mem.concat(allocator, u8, &[_][]const u8{ base[0..index], "_small", base[index..] });
     const small_path = try std.fs.path.joinZ(allocator, &[_][]const u8{ dir, small_base });
-    std.debug.print("small image path: {s}\n", .{small_path});
+    std.debug.print("image info: {any}\n", .{small_image});
 
     try zstbi.Image.writeToFile(small_image, small_path, .{ .jpg = .{ .quality = 95 } });
 }
