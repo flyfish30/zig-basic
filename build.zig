@@ -25,6 +25,7 @@ pub fn build(b: *std.Build) void {
     });
 
     exe.addIncludePath(.{ .path = "libs/zstbi/libs/stbi" });
+    exe.linkLibC();
     if (optimize == .Debug) {
         // TODO: Workaround for Zig bug.
         exe.addCSourceFile(.{
