@@ -1,14 +1,8 @@
 const std = @import("std");
+const simd = @import("simd_core.zig");
 
-const VEC_BITS_LEN = (std.simd.suggestVectorSize(u8) orelse 128) * @bitSizeOf(u8);
-
-pub fn VecLen(comptime T: type) usize {
-    return VEC_BITS_LEN / @bitSizeOf(T);
-}
-
-pub fn VecType(comptime T: type) type {
-    return @Vector(VecLen(T), T);
-}
+const VecLen = simd.VecLen;
+const VecType = simd.VecType;
 
 pub fn bitonicSort1V(comptime T: type, vec: VecType(T)) VecType(T) {
     const dummy_vec: VecType(T) = undefined;

@@ -1,30 +1,24 @@
 const std = @import("std");
-const target = @import("builtin").target;
+const psel = @import("pack_select.zig");
+
+const simd = @import("simd_core.zig");
+
+const VecLen = simd.VecLen;
+const VecType = simd.VecType;
+const VectorIndex = std.simd.VectorIndex;
+
+const builtin = @import("builtin");
+const target = builtin.target;
 const arch = target.cpu.arch;
-
-pub const I64x2 = @Vector(2, i64);
-pub const U64x2 = @Vector(2, u64);
-pub const I32x4 = @Vector(4, i32);
-pub const U32x4 = @Vector(4, u32);
-pub const I16x8 = @Vector(8, i16);
-pub const U16x8 = @Vector(8, u16);
-
-pub const I32x4x4 = @Vector(16, u32);
-pub const U32x4x4 = @Vector(16, u32);
 
 const LINE_END_DELIM = switch (target.os.tag) {
     .windows => '\r',
     else => '\n',
 };
 
-const SimdSamples = switch (arch) {
-    .x86_64 => @import("simd_x86_64.zig").SimdSamples,
-    .aarch64 => @import("simd_aarch64.zig").SimdSamples,
-    else => @import("simd_generic.zig").SimdSamples,
-};
+const SimdSamples = simd.SimdSamples;
 
 pub fn simdSample() !void {
-    std.debug.print("target: {any}\n", .{target});
     std.debug.print("cpu arch: {any}\n", .{arch});
 
     switch (arch) {
@@ -76,8 +70,8 @@ pub fn simdSample() !void {
     vacc = @select(u32, mask, vacc, v55);
     std.debug.print("select vacc = {any}\n", .{vacc});
 
-    var fa: I16x8 = @splat(25);
-    const fb: I16x8 = @splat(32);
+    var fa: simd.I16x8 = @splat(25);
+    const fb: simd.I16x8 = @splat(32);
     fa = SimdSamples.binOpI16x8(fa, fb);
     std.debug.print("fa = {d}\n", .{fa});
 
@@ -135,6 +129,16 @@ pub fn simdSample() !void {
     const rt_u16: u32 = (3 << 16) | 8;
     const vmul_u16 = regVecMulS2wU16Even(v16h, rt_u16);
     std.debug.print("vmul_u16: {any}\n", .{vmul_u16});
+
+    const x: u16 = 0b0010_0100_1010_0010;
+    const pxor_x = simd.prefix_xor(x);
+    std.debug.print("prefix_xor 0b{b:0>16} is: 0b{b:0>16}\n", .{ x, pxor_x });
+
+    const vec: @Vector(32, u8) = std.simd.iota(u8, 32);
+    const pack_vec = psel.packSelectLeft(vec, mask);
+    std.debug.print("pack_vec is: {any}\n mask ture count: {d}\n", .{ pack_vec, @popCount(@as(u32, @bitCast(mask))) });
+
+    lookupTableSample();
 }
 
 pub inline fn combine(vec1: @Vector(32, u32), vec2: @TypeOf(vec1)) @Vector(64, u32) {
@@ -240,4 +244,35 @@ fn regVecMulS2wI16Odd(vec_pair: @Vector(32, i16), rt: u32) @Vector(8, i32) {
 fn regVecMulS2wU16Odd(vec_pair: @Vector(32, i16), rt: u32) @Vector(8, i32) {
     const vec = std.simd.join(std.simd.extract(vec_pair, 1, 15), std.simd.extract(vec_pair, 30, 1));
     return regVecMulS2wU16Even(vec, rt);
+}
+
+fn lookupTableSample() void {
+    const tbl: @Vector(VecLen(u8), u8) = std.simd.iota(u8, VecLen(u8));
+    const idx: @Vector(VecLen(u8), i8) = std.simd.repeat(VecLen(i8), @Vector(5, i8){ 9, 21, 4, 12, 25 });
+    const out_vec = simd.tableLookupBytes(tbl, idx);
+    std.debug.print("packSelect out_vec: {any}\n", .{out_vec});
+
+    const VT = u32;
+    const vec: @Vector(VecLen(VT), VT) = std.simd.iota(VT, VecLen(VT)) + @as(@Vector(VecLen(VT), VT), @splat(1));
+    std.debug.print("shiftRightVec vec: {any}\n", .{vec});
+    var count: VectorIndex(@TypeOf(vec)) = 3;
+    const shifted6_vec = simd.shiftRightVec(VT, @as(@Vector(VecLen(VT), VT), @bitCast(vec)), count);
+    std.debug.print("shiftRightVec by {d} to out_vec: {any}\n", .{ count, shifted6_vec });
+    count = 2;
+    const shifted4_vec = simd.shiftRightVec(VT, @as(@Vector(VecLen(VT), VT), @bitCast(vec)), count);
+    std.debug.print("shiftRightVec by {d} to out_vec: {any}\n", .{ count, shifted4_vec });
+    count = 1;
+    const shifted1_vec = simd.shiftRightVec(VT, @as(@Vector(VecLen(VT), VT), @bitCast(vec)), count);
+    std.debug.print("shiftRightVec by {d} to out_vec: {any}\n", .{ count, shifted1_vec });
+
+    count = 3;
+    const lefted6_vec = simd.shiftLeftVec(VT, @as(@Vector(VecLen(VT), VT), @bitCast(vec)), count);
+    std.debug.print("shiftLeftVec by {d} to out_vec: {any}\n", .{ count, lefted6_vec });
+    count = 2;
+    const lefted4_vec = simd.shiftLeftVec(VT, @as(@Vector(VecLen(VT), VT), @bitCast(vec)), count);
+    std.debug.print("shiftLeftVec by {d} to out_vec: {any}\n", .{ count, lefted4_vec });
+    count = 1;
+    const lefted1_vec = simd.shiftLeftVec(VT, @as(@Vector(VecLen(VT), VT), @bitCast(vec)), count);
+    std.debug.print("shiftLeftVec by {d} to out_vec: {any}\n", .{ count, lefted1_vec });
+    return;
 }
