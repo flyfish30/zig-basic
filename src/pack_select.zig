@@ -10,117 +10,101 @@ const assert = std.debug.assert;
 const VEC_BITS_LEN = simd.VEC_BITS_LEN;
 const VecLen = simd.VecLen;
 const VecType = simd.VecType;
+const vectorLength = simd.vectorLength;
+const VecChild = simd.VecChild;
 
-fn vectorLength(comptime VectorType: type) comptime_int {
-    return switch (@typeInfo(VectorType)) {
-        .Vector => |info| info.len,
-        .Array => |info| info.len,
-        else => @compileError("Invalid type " ++ @typeName(VectorType)),
-    };
-}
-
-fn VecChild(comptime T: type) type {
-    return std.meta.Child(T);
+fn Pair(comptime VType: type) type {
+    return struct { VType, VType };
 }
 
 pub fn packSelectLeft(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bool)) @TypeOf(vec) {
-    return packSelectLeftGeneric(vec, mask);
+    return packSelect(vec, mask)[0];
 }
 
-fn packSelectLeftGeneric(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bool)) @TypeOf(vec) {
+pub fn packSelect(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bool)) Pair(@TypeOf(vec)) {
+    return packSelectGeneric(vec, mask);
+}
+
+fn packSelectGeneric(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bool)) Pair(@TypeOf(vec)) {
     const Child = VecChild(@TypeOf(vec));
     const vecLen = comptime vectorLength(@TypeOf(vec));
     var int_mask = @as(std.meta.Int(.unsigned, vecLen), @bitCast(mask));
     std.debug.print("packSelect int_mask is: 0b{b:0>32}\n", .{int_mask});
 
-    const num_groups = @popCount(int_mask & ~(int_mask << 1));
-    _ = num_groups;
+    switch (VEC_BITS_LEN) {
+        128 => {
+            return packSelectVec128(vec, mask);
+        },
+        256 => {
+            const mask0: @Vector(vecLen / 2, bool) = std.simd.extract(mask, 0, vecLen / 2);
+            const mask1: @Vector(vecLen / 2, bool) = std.simd.extract(mask, vecLen / 2, vecLen / 2);
+            const mask0_u: u32 = @as(std.meta.Int(.unsigned, vecLen / 2), @bitCast(mask0));
+            const mask1_u: u32 = @as(std.meta.Int(.unsigned, vecLen / 2), @bitCast(mask1));
+            const count0 = @popCount(mask0_u);
+            const count1 = @popCount(mask1_u);
 
-    //        var result: @TypeOf(vec) = 0;
-    //        var cur_pos = 0;
-    //        while (int_mask != 0) {
-    //            const mask_ctz = @ctz(int_mask);
-    //            const num_ones = @ctz(~(int_mask >> mask_ctz));
-    //
-    //            result =
-    //            comptime var ones = 1;
-    //            inline for (0..num_ones) |_| ones <<= 1;
-    //            ones -%= 1;
-    //            // @compileLog(std.fmt.comptimePrint("ans |= (src >> {}) & 0b{b}", .{ mask_ctz - cur_pos, (ones << cur_pos) }));
-    //            ans |= (src >> (mask_ctz - cur_pos)) & (ones << cur_pos);
-    //            cur_pos += num_ones;
-    //            for (0..num_ones) |_| int_mask &= int_mask - 1;
-    //        }
-    //        return ans;
-    const select_mask = std.simd.iota(u8, vecLen) >= @as(@Vector(vecLen, u8), @splat(@as(u8, @popCount(int_mask))));
-    return @select(Child, select_mask, vec, @as(@Vector(vecLen, Child), @splat(0)));
+            const vec0_pair = packSelectVec128(std.simd.extract(vec, 0, vecLen / 2), mask0);
+            const vec1_pair = packSelectVec128(std.simd.extract(vec, vecLen / 2, vecLen / 2), mask1);
+
+            var vec_lane: [vecLen * 2]Child align(64) = undefined;
+            vec_lane[0 .. vecLen / 2].* = vec0_pair[0];
+            vec_lane[count0..][0 .. vecLen / 2].* = vec1_pair[0];
+            vec_lane[vecLen * 3 / 2 .. vecLen * 2].* = vec1_pair[1];
+            vec_lane[vecLen + count1 ..][0 .. vecLen / 2].* = vec0_pair[1];
+            std.debug.print("packSelectGeneric vec_lane is {any}\n", .{vec_lane});
+            return .{ @bitCast(std.simd.extract(vec_lane, 0, vecLen)), @bitCast(std.simd.extract(vec_lane, vecLen, vecLen)) };
+        },
+        else => @compileError(std.fmt.comptimePrint("packSelectLeftGeneric can not support {d} bits vector", .{VEC_BITS_LEN})),
+    }
 }
 
-// pub fn packSelectLeft(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bool)) @Vector(vectorLength(@TypeOf(vec)), VecChild(@TypeOf(vec))) {
-//     const Child = VecChild(@TypeOf(vec));
-//     // const vecLen = comptime vectorLength(@TypeOf(vec));
-//
-//     const MaskUint = std.meta.Int(.unsigned, VEC_BITS_LEN / 4);
-//     const ChildVecLen = VEC_BITS_LEN / @bitSizeOf(Child);
-//     const ChildAsUint = std.meta.Int(.unsigned, @bitSizeOf(Child));
-//     const max_child_uint = std.math.maxInt(ChildAsUint);
-//     const max_masks: @Vector(ChildVecLen, ChildAsUint) = @splat(max_child_uint);
-//     const zero_masks: @Vector(ChildVecLen, ChildAsUint) = @splat(0);
-//
-//     const dummy_mask: @Vector(4, MaskUint) = undefined;
-//     const vec_mask: @Vector(4, MaskUint) = @bitCast(@select(Child, mask, max_masks, zero_masks));
-//     std.debug.print("packSelect mask: {any}\n", .{mask});
-//     std.debug.print("packSelect max_masks: {any}\n", .{max_masks});
-//     std.debug.print("packSelect vec_mask: {any}\n", .{vec_mask});
-//     const shiftMask0 = @shuffle(MaskUint, vec_mask, dummy_mask, @Vector(4, i32){ 0, 1, 2, 2 });
-//     const shiftMask1 = @shuffle(MaskUint, vec_mask, dummy_mask, @Vector(4, i32){ 0, 1, 1, 1 });
-//     const shiftMask2 = @shuffle(MaskUint, vec_mask, dummy_mask, @Vector(4, i32){ 0, 0, 0, 0 });
-//     const shiftMask0b = shiftMask0 > @as(@Vector(4, MaskUint), @splat(0));
-//     const shiftMask1b = shiftMask1 > @as(@Vector(4, MaskUint), @splat(0));
-//     const shiftMask2b = shiftMask2 > @as(@Vector(4, MaskUint), @splat(0));
-//     std.debug.print("packSelect shiftMask0b: {any}\n", .{shiftMask0b});
-//     std.debug.print("packSelect shiftMask1b: {any}\n", .{shiftMask1b});
-//     std.debug.print("packSelect shiftMask2b: {any}\n", .{shiftMask2b});
-//
-//     var vec_as_masku: @Vector(4, MaskUint) = @bitCast(vec);
-//     const perm_vec0 = @shuffle(MaskUint, vec_as_masku, dummy_mask, @Vector(4, i32){ 1, 2, 3, 3 });
-//     std.debug.print("packSelect perm_vec0: {any}\n", .{perm_vec0});
-//     vec_as_masku = @select(MaskUint, shiftMask0b, vec_as_masku, perm_vec0);
-//     const perm_vec1 = @shuffle(MaskUint, vec_as_masku, dummy_mask, @Vector(4, i32){ 1, 2, 3, 3 });
-//     std.debug.print("packSelect perm_vec1: {any}\n", .{perm_vec1});
-//     vec_as_masku = @select(MaskUint, shiftMask1b, vec_as_masku, perm_vec1);
-//     const perm_vec2 = @shuffle(MaskUint, vec_as_masku, dummy_mask, @Vector(4, i32){ 1, 2, 3, 3 });
-//     std.debug.print("packSelect perm_vec2: {any}\n", .{perm_vec2});
-//     vec_as_masku = @select(MaskUint, shiftMask2b, vec_as_masku, perm_vec2);
-//     return @bitCast(vec_as_masku);
-// }
+fn packSelectVec128(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bool)) Pair(@TypeOf(vec)) {
+    const Child = VecChild(@TypeOf(vec));
+    const vecLen = comptime vectorLength(@TypeOf(vec));
 
-// inline __m128 left_pack(__m128 val, __m128i mask) noexcept
-// {
-//     const __m128i shiftMask0 = _mm_shuffle_epi32(mask, 0xA4);
-//     const __m128i shiftMask1 = _mm_shuffle_epi32(mask, 0x54);
-//     const __m128i shiftMask2 = _mm_shuffle_epi32(mask, 0x00);
-//
-//     __m128 v = val;
-//     v = _mm_blendv_ps(_mm_permute_ps(v, 0xF9), v, shiftMask0);
-//     v = _mm_blendv_ps(_mm_permute_ps(v, 0xF9), v, shiftMask1);
-//     v = _mm_blendv_ps(_mm_permute_ps(v, 0xF9), v, shiftMask2);
-//     return v;
-// }
-//
-// inline __m256 left_pack(__m256d val, __m256i mask) noexcept
-// {
-//     const __m256i shiftMask0 = _mm256_permute4x64_epi64(mask, 0xA4);
-//     const __m256i shiftMask1 = _mm256_permute4x64_epi64(mask, 0x54);
-//     const __m256i shiftMask2 = _mm256_permute4x64_epi64(mask, 0x00);
-//
-//     __m256d v = val;
-//     v = _mm256_blendv_pd(_mm256_permute4x64_pd(v, 0xF9), v, shiftMask0);
-//     v = _mm256_blendv_pd(_mm256_permute4x64_pd(v, 0xF9), v, shiftMask1);
-//     v = _mm256_blendv_pd(_mm256_permute4x64_pd(v, 0xF9), v, shiftMask2);
-//
-//     return v;
-// }
+    switch (@bitSizeOf(Child)) {
+        8 => {
+            const mask0: @Vector(8, bool) = std.simd.extract(mask, 0, 8);
+            const mask1: @Vector(8, bool) = std.simd.extract(mask, 8, 8);
+            const mask0_u: u32 = @as(std.meta.Int(.unsigned, 8), @bitCast(mask0));
+            const mask1_u: u32 = @as(std.meta.Int(.unsigned, 8), @bitCast(mask1));
+            const count0 = @popCount(mask0_u);
+            const count1 = @popCount(mask1_u);
+
+            const in0_u8: @Vector(8, u8) = @bitCast(std.simd.extract(vec, 0, 8));
+            const in1_u8: @Vector(8, u8) = @bitCast(std.simd.extract(vec, 8, 8));
+            const zeros: @Vector(8, Child) = @splat(0);
+
+            // TODO: It is only for little-endian, it should to implement
+            // it for big-endian
+            const in0_v16u8 = std.simd.interlace([_]@Vector(8, u8){ in0_u8, zeros });
+            const in1_v16u8 = std.simd.interlace([_]@Vector(8, u8){ in1_u8, zeros });
+
+            const idx0: @Vector(16, i8) = @bitCast(IdxFromBits(u16, mask0_u));
+            const vec0_v16 = simd.tableLookup128Bytes(in0_v16u8, idx0);
+            const idx1: @Vector(16, i8) = @bitCast(IdxFromBits(u16, mask1_u));
+            const vec1_v16 = simd.tableLookup128Bytes(in1_v16u8, idx1);
+            const vec0: @Vector(8, u8) = @bitCast(std.simd.deinterlace(2, vec0_v16)[0]);
+            const vec1: @Vector(8, u8) = @bitCast(std.simd.deinterlace(2, vec1_v16)[0]);
+
+            var vec_lane: [vecLen * 2]Child align(64) = undefined;
+            vec_lane[0 .. vecLen / 2].* = vec0;
+            vec_lane[count0..][0 .. vecLen / 2].* = vec1;
+            vec_lane[vecLen * 3 / 2 .. vecLen * 2].* = vec1;
+            vec_lane[vecLen + count1 ..][0 .. vecLen / 2].* = vec0;
+            return .{ @bitCast(std.simd.extract(vec_lane, 0, vecLen)), @bitCast(std.simd.extract(vec_lane, vecLen, vecLen)) };
+        },
+        16, 32, 64 => {
+            const mask_u64: u64 = @as(std.meta.Int(.unsigned, vecLen), @bitCast(mask));
+            const idx: @Vector(16, i8) = @bitCast(IdxFromBits(Child, mask_u64));
+            const packed_vec = simd.tableLookup128Bytes(@as(@Vector(16, u8), @bitCast(vec)), idx);
+            return .{ @bitCast(packed_vec), @bitCast(packed_vec) };
+        },
+        else => @compileError("packSelectVec128 can not support element type: " ++ @typeName(Child)),
+    }
+
+    return vec;
+}
 
 // NEON does not provide an equivalent of AVX2 permutevar, so we need byte
 // indices for VTBL (one vector's worth for each of 256 combinations of
@@ -462,23 +446,21 @@ const not_indices64x2: [4 * 16]u8 align(16) = .{
     0, 1, 2,  3,  4,  5,  6,  7,  8, 9, 10, 11, 12, 13, 14, 15,
 };
 
-fn IdxFromBits(comptime T: type, mask_bits: u64) @Vector(VecLen(T), T) {
+fn IdxFromBits(comptime T: type, mask_bits: u64) @Vector(16, u8) {
     switch (@sizeOf(T)) {
         2 => {
             assert(mask_bits < 256);
-            const byte_idx: @Vector(u8, 8) = table16x8[mask_bits * 8][0..8];
-            const pairs: @Vector(u16, 8) = @bitCast(std.simd.interlace([_]@Vector(u8, 8){ byte_idx, byte_idx }));
-            return @bitCast(pairs + @as(@Vector(u16, 8), @splat(0x100)));
+            const byte_idx: @Vector(8, u8) = table16x8[mask_bits * 8 ..][0..8].*;
+            const pairs: @Vector(8, u16) = @bitCast(std.simd.interlace([_]@Vector(8, u8){ byte_idx, byte_idx }));
+            return @bitCast(pairs + @as(@Vector(8, u16), @splat(0x100)));
         },
         4 => {
             assert(mask_bits < 16);
-            const index: @Vector(u8, 16) = indices32x4[mask_bits * 16][0..16];
-            return @bitCast(index);
+            return indices32x4[mask_bits * 16 ..][0..16].*;
         },
         8 => {
             assert(mask_bits < 4);
-            const index: @Vector(u8, 16) = indices64x2[mask_bits * 16][0..16];
-            return @bitCast(index);
+            return indices64x2[mask_bits * 16 ..][0..16].*;
         },
         else => @compileError("Invalid type for IdxFromBits" ++ @typeName(T)),
     }

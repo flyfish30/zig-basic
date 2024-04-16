@@ -48,6 +48,11 @@ pub fn tableLookupBytes(tbl: @Vector(VecLen(u8), u8), idx: @Vector(VecLen(i8), i
     return neon_shuffle_u8(tbl, idx);
 }
 
+pub fn tableLookup128Bytes(tbl: @Vector(16, u8), idx: @Vector(16, i8)) @TypeOf(tbl) {
+    // neon has 128 bits vector
+    return neon_shuffle_u8(tbl, idx);
+}
+
 /// Elements are shifted rightwards (towards higher indices). The shifted most
 /// lowest elements will filled zero.
 pub fn shiftRightVec(comptime T: type, vec: @Vector(VecLen(T), T), count: VectorIndex(@TypeOf(vec))) @TypeOf(vec) {

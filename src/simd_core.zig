@@ -31,6 +31,18 @@ pub fn VecType(comptime T: type) type {
     return @Vector(VecLen(T), T);
 }
 
+pub fn vectorLength(comptime VectorType: type) comptime_int {
+    return switch (@typeInfo(VectorType)) {
+        .Vector => |info| info.len,
+        .Array => |info| info.len,
+        else => @compileError("Invalid type " ++ @typeName(VectorType)),
+    };
+}
+
+pub fn VecChild(comptime T: type) type {
+    return std.meta.Child(T);
+}
+
 /// Given a bitmask, will return a mask where the bits are filled in between.
 /// It is just reduce bits with XOR bit operator.
 /// On modern x86 and aarch64 CPU's, it should have a latency of 3 and a throughput of 1.

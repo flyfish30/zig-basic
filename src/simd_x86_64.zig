@@ -55,8 +55,22 @@ pub fn tableLookupBytes(tbl: @Vector(VecLen(u8), u8), idx: @Vector(VecLen(i8), i
             return result0 + result1;
         },
         // 512 => ,
-        else => @compileError("tableLookupBytes not support VEC_BITS_LEN is " ++ VEC_BITS_LEN),
+        else => @compileError("tableLookupBytes: not support more than 512 bits or above"),
     }
+}
+
+inline fn mm128_shuffle_u8(vec: @Vector(16, u8), idx: @Vector(16, i8)) @TypeOf(vec) {
+    const mm_vec: @Vector(2, i64) = @bitCast(vec);
+    const mm_idx: @Vector(2, i64) = @bitCast(idx);
+    return asm ("vpshufb %[indices], %[tbl], %[result]"
+        : [result] "=x" (-> @Vector(16, u8)),
+        : [tbl] "x" (mm_vec),
+          [indices] "x" (mm_idx),
+    );
+}
+
+pub fn tableLookup128Bytes(tbl: @Vector(16, u8), idx: @Vector(16, i8)) @TypeOf(tbl) {
+    return mm128_shuffle_u8(tbl, idx);
 }
 
 /// Elements are shifted rightwards (towards higher indices). The shifted most
@@ -169,7 +183,7 @@ fn shiftRightVecU8(vec: @Vector(VecLen(u8), u8), count: VectorIndex(@TypeOf(vec)
             return result0 + std.simd.shiftElementsRight(result1, 16, 0);
         },
         // 512 => ,
-        else => @compileError("tableLookupBytes not support VEC_BITS_LEN is " ++ VEC_BITS_LEN),
+        else => @compileError("shiftRightVecU8 not support 512 or above bits vector"),
     }
 }
 
@@ -228,6 +242,6 @@ fn shiftLeftVecU8(vec: @Vector(VecLen(u8), u8), count: VectorIndex(@TypeOf(vec))
             return result0 + std.simd.shiftElementsLeft(result1, 16, 0);
         },
         // 512 => ,
-        else => @compileError("tableLookupBytes not support VEC_BITS_LEN is " ++ VEC_BITS_LEN),
+        else => @compileError("shiftLeftVecU8 not support VEC_BITS_LEN is " ++ VEC_BITS_LEN),
     }
 }

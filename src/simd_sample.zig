@@ -134,9 +134,12 @@ pub fn simdSample() !void {
     const pxor_x = simd.prefix_xor(x);
     std.debug.print("prefix_xor 0b{b:0>16} is: 0b{b:0>16}\n", .{ x, pxor_x });
 
-    const vec: @Vector(32, u8) = std.simd.iota(u8, 32);
-    const pack_vec = psel.packSelectLeft(vec, mask);
-    std.debug.print("pack_vec is: {any}\n mask ture count: {d}\n", .{ pack_vec, @popCount(@as(u32, @bitCast(mask))) });
+    const VT = u8;
+    const vec: @Vector(VecLen(VT), VT) = std.simd.iota(VT, VecLen(VT));
+    const pack_mask = std.simd.extract(mask, 0, VecLen(VT));
+    const pack_pair = psel.packSelect(vec, pack_mask);
+    std.debug.print("pack_left is: {any}\n pack_right is: {any}\n", .{ pack_pair[0], pack_pair[1] });
+    std.debug.print("mask ture count: {d}\n", .{@popCount(@as(u32, @bitCast(pack_mask)))});
 
     lookupTableSample();
 }
@@ -250,7 +253,7 @@ fn lookupTableSample() void {
     const tbl: @Vector(VecLen(u8), u8) = std.simd.iota(u8, VecLen(u8));
     const idx: @Vector(VecLen(u8), i8) = std.simd.repeat(VecLen(i8), @Vector(5, i8){ 9, 21, 4, 12, 25 });
     const out_vec = simd.tableLookupBytes(tbl, idx);
-    std.debug.print("packSelect out_vec: {any}\n", .{out_vec});
+    std.debug.print("tableLookupBytes out_vec: {any}\n", .{out_vec});
 
     const VT = u32;
     const vec: @Vector(VecLen(VT), VT) = std.simd.iota(VT, VecLen(VT)) + @as(@Vector(VecLen(VT), VT), @splat(1));
