@@ -135,11 +135,13 @@ pub fn simdSample() !void {
     std.debug.print("prefix_xor 0b{b:0>16} is: 0b{b:0>16}\n", .{ x, pxor_x });
 
     const VT = u8;
-    const vec: @Vector(VecLen(VT), VT) = std.simd.iota(VT, VecLen(VT));
+    const MaskInt = std.meta.Int(.unsigned, VecLen(VT));
+    var vec: @Vector(VecLen(VT), VT) = std.simd.iota(VT, VecLen(VT));
+    vec += @splat(@intCast(bias));
     const pack_mask = std.simd.extract(mask, 0, VecLen(VT));
     const pack_pair = psel.packSelect(vec, pack_mask);
     std.debug.print("pack_left is: {any}\n pack_right is: {any}\n", .{ pack_pair[0], pack_pair[1] });
-    std.debug.print("mask ture count: {d}\n", .{@popCount(@as(u32, @bitCast(pack_mask)))});
+    std.debug.print("mask ture count: {d}\n", .{@popCount(@as(MaskInt, @bitCast(pack_mask)))});
 
     lookupTableSample();
 }
