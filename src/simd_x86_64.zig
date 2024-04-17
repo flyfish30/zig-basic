@@ -14,7 +14,7 @@ const VecU8Index = VectorIndex(@Vector(VecLen(u8), u8));
 
 const c = @cImport({
     @cInclude("immintrin.h");
-    // @cInclude("x86_64_intrins.h");
+    @cInclude("x86_64_intrins.h");
 });
 
 pub const SimdSamples = struct {
