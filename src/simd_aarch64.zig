@@ -1,5 +1,6 @@
 const std = @import("std");
 const simd = @import("simd_core.zig");
+const simdg = @import("simd_generic.zig");
 
 const target = @import("builtin").target;
 const arch = target.cpu.arch;
@@ -34,6 +35,18 @@ pub const SimdSamples = struct {
         return .{ vec_out0, vec_out1, vec_out2, vec_out3 };
     }
 };
+
+pub fn maskedLoadVecOr(comptime T: type, val_vec: @Vector(VecLen(T), T), mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
+    return simdg.maskedLoadVecOr(T, val_vec, mask, buf);
+}
+
+pub fn maskedLoadVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
+    return simdg.maskedLoadVec(T, mask, buf);
+}
+
+pub fn maskedStoreVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T, vec: @Vector(VecLen(T), T)) void {
+    simdg.maskedStoreVec(T, mask, buf, vec);
+}
 
 inline fn neon_shuffle_u8(vec: @Vector(VecLen(u8), u8), idx: @Vector(VecLen(i8), i8)) @TypeOf(vec) {
     const neon_idx: @Vector(VecLen(u8), u8) = @bitCast(idx);

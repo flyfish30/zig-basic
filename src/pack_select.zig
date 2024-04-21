@@ -100,7 +100,7 @@ fn packSelectVec128(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bool
     return vec;
 }
 
-const table8x16: [256 * 8]u8 align(8) = table_indices: {
+const table8x16: [256 * 8]u8 align(16) = table_indices: {
     comptime var indices: @Vector(256 * 8, u8) = table16x8[0 .. 256 * 8].*;
     indices /= @splat(2);
     break :table_indices @bitCast(indices);

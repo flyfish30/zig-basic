@@ -4,6 +4,7 @@ const target = @import("builtin").target;
 const arch = target.cpu.arch;
 
 const simd = @import("simd_core.zig");
+const simdg = @import("simd_generic.zig");
 
 const VEC_BITS_LEN = simd.VEC_BITS_LEN;
 const VecLen = simd.VecLen;
@@ -17,12 +18,87 @@ const c = @cImport({
     @cInclude("x86_64_intrins.h");
 });
 
+fn hasAvx2() bool {
+    if (arch == .x86_64) {
+        const hasFeature = std.Target.x86.featureSetHas;
+        return hasFeature(target.cpu.features, .avx2);
+    }
+
+    return false;
+}
+
 pub const SimdSamples = struct {
     pub fn binOpI16x8(vec1: simd.I16x8, vec2: simd.I16x8) simd.I16x8 {
         const acc = c._mm_mullo_epi16(@bitCast(vec1), @bitCast(vec2));
         return @bitCast(acc);
     }
 };
+
+inline fn mm_maskload_vec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
+    const VecBitsInt = std.meta.Int(.unsigned, VEC_BITS_LEN);
+    const mm_buf: @Vector(VecLen(i64), i64) = @bitCast(@as(VecBitsInt, @intFromPtr(&buf)));
+
+    const all_zeros: @Vector(VecLen(T), T) = @splat(0x0);
+    const all_ones = ~all_zeros;
+    const t_mask = @select(T, mask, all_ones, all_zeros);
+    const mm_mask: @Vector(VecLen(i64), i64) = @bitCast(t_mask);
+    switch (@sizeOf(T)) {
+        32, 64, 128 => {
+            return asm ("vpmaskmovd %[result], %[mask], %[addr]"
+                : [result] "=x" (-> @Vector(VecLen(T), T)),
+                : [mask] "x" (mm_mask),
+                  [addr] "x" (mm_buf),
+            );
+        },
+        else => @compileError("Not support type " ++ @typeName(T)),
+    }
+}
+
+pub fn mm_maskstore_vec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T, vec: @Vector(VecLen(T), T)) void {
+    const VecBitsInt = std.meta.Int(.unsigned, VEC_BITS_LEN);
+    const mm_vec: @Vector(VecLen(i64), i64) = @bitCast(vec);
+    const mm_buf: @Vector(VecLen(i64), i64) = @bitCast(@as(VecBitsInt, @intFromPtr(&buf)));
+
+    const all_zeros: @Vector(VecLen(T), T) = @splat(0x0);
+    const all_ones = ~all_zeros;
+    const t_mask = @select(T, mask, all_ones, all_zeros);
+    const mm_mask: @Vector(VecLen(i64), i64) = @bitCast(t_mask);
+    switch (@sizeOf(T)) {
+        32, 64, 128 => {
+            asm ("vpmaskmovd %[addr], %[mask], %[vec]"
+                : [addr] "=x" (mm_buf),
+                : [mask] "x" (mm_mask),
+                  [vec] "x" (mm_vec),
+            );
+        },
+        else => @compileError("Not support type " ++ @typeName(T)),
+    }
+}
+
+pub fn maskedLoadVecOr(comptime T: type, val_vec: @Vector(VecLen(T), T), mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
+    if (comptime hasAvx2() and @sizeOf(T) >= 32) {
+        const vec = mm_maskload_vec(T, mask, buf);
+        return @select(T, mask, vec, val_vec);
+    } else {
+        return simdg.maskedLoadVecOr(T, val_vec, mask, buf);
+    }
+}
+
+pub fn maskedLoadVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
+    if (comptime hasAvx2() and @sizeOf(T) >= 32) {
+        return mm_maskload_vec(T, mask, buf);
+    } else {
+        return simdg.maskedLoadVec(T, mask, buf);
+    }
+}
+
+pub fn maskedStoreVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T, vec: @Vector(VecLen(T), T)) void {
+    if (comptime hasAvx2() and @sizeOf(T) >= 32) {
+        return mm_maskstore_vec(T, mask, buf, vec);
+    } else {
+        return simdg.maskedStoreVec(T, mask, buf, vec);
+    }
+}
 
 inline fn mm_shuffle_u8(vec: @Vector(VecLen(u8), u8), idx: @Vector(VecLen(i8), i8)) @TypeOf(vec) {
     const mm_vec: @Vector(VecLen(i64), i64) = @bitCast(vec);

@@ -43,6 +43,21 @@ pub fn VecChild(comptime T: type) type {
     return std.meta.Child(T);
 }
 
+pub fn isBitsPackedLeft(int_mask: anytype) bool {
+    const info = @typeInfo(@TypeOf(int_mask));
+    if (!(info == .Int or
+        info == .Comptime_Int))
+    {
+        @compileError("The int_mask not a int type");
+    }
+
+    // check all bits of mask is packed left, as bellow
+    //    lsb ..             msb
+    //  [ 1, 1, .. 1, 0, 0, .. 0 ]
+    const isPackedLeft: bool = int_mask & (~(int_mask << 1)) == 0x1;
+    return isPackedLeft;
+}
+
 /// Given a bitmask, will return a mask where the bits are filled in between.
 /// It is just reduce bits with XOR bit operator.
 /// On modern x86 and aarch64 CPU's, it should have a latency of 3 and a throughput of 1.
