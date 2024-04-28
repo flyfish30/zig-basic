@@ -34,6 +34,12 @@ pub const SimdSamples = struct {
     }
 };
 
+/// Get the mask of @Vector(VecLen(T), bool) that have consecutive n bits is 1
+/// from lsb.
+pub fn maskFirstN(comptime T: type, n: usize) @Vector(VecLen(T), bool) {
+    return simdg.maskFirstN(T, n);
+}
+
 inline fn mm_maskload_vec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
     const VecBitsInt = std.meta.Int(.unsigned, VEC_BITS_LEN);
     const mm_buf: @Vector(VecLen(i64), i64) = @bitCast(@as(VecBitsInt, @intFromPtr(&buf)));
@@ -97,6 +103,31 @@ pub fn maskedStoreVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T
         return mm_maskstore_vec(T, mask, buf, vec);
     } else {
         return simdg.maskedStoreVec(T, mask, buf, vec);
+    }
+}
+
+pub fn blendedLoadVecOr(comptime T: type, val_vec: @Vector(VecLen(T), T), mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
+    if (comptime hasAvx2() and @sizeOf(T) >= 32) {
+        const vec = mm_maskload_vec(T, mask, buf);
+        return @select(T, mask, vec, val_vec);
+    } else {
+        return simdg.blendedLoadVecOr(T, val_vec, mask, buf);
+    }
+}
+
+pub fn blendedLoadVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
+    if (comptime hasAvx2() and @sizeOf(T) >= 32) {
+        return mm_maskload_vec(T, mask, buf);
+    } else {
+        return simdg.blendedLoadVec(T, mask, buf);
+    }
+}
+
+pub fn blendedStoreVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T, vec: @Vector(VecLen(T), T)) void {
+    if (comptime hasAvx2() and @sizeOf(T) >= 32) {
+        return mm_maskstore_vec(T, mask, buf, vec);
+    } else {
+        return simdg.blendedStoreVec(T, mask, buf, vec);
     }
 }
 

@@ -36,6 +36,12 @@ pub const SimdSamples = struct {
     }
 };
 
+/// Get the mask of @Vector(VecLen(T), bool) that have consecutive n bits is 1
+/// from lsb.
+pub fn maskFirstN(comptime T: type, n: usize) @Vector(VecLen(T), bool) {
+    return simdg.maskFirstN(T, n);
+}
+
 pub fn maskedLoadVecOr(comptime T: type, val_vec: @Vector(VecLen(T), T), mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
     return simdg.maskedLoadVecOr(T, val_vec, mask, buf);
 }
@@ -46,6 +52,18 @@ pub fn maskedLoadVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T)
 
 pub fn maskedStoreVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T, vec: @Vector(VecLen(T), T)) void {
     simdg.maskedStoreVec(T, mask, buf, vec);
+}
+
+pub fn blendedLoadVecOr(comptime T: type, val_vec: @Vector(VecLen(T), T), mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
+    return simdg.blendedLoadVecOr(T, val_vec, mask, buf);
+}
+
+pub fn blendedLoadVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
+    return simdg.blendedLoadVec(T, mask, buf);
+}
+
+pub fn blendedStoreVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T, vec: @Vector(VecLen(T), T)) void {
+    simdg.blendedStoreVec(T, mask, buf, vec);
 }
 
 inline fn neon_shuffle_u8(vec: @Vector(VecLen(u8), u8), idx: @Vector(VecLen(i8), i8)) @TypeOf(vec) {

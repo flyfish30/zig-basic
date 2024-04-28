@@ -14,6 +14,13 @@ pub const SimdSamples = struct {
     }
 };
 
+/// Get the mask of @Vector(VecLen(T), bool) that have consecutive n bits is 1
+/// from lsb.
+pub fn maskFirstN(comptime T: type, n: usize) @Vector(VecLen(T), bool) {
+    const splat_n: @Vector(VecLen(T), u16) = @splat(@intCast(n));
+    return std.simd.iota(u16, VecLen(T)) < splat_n;
+}
+
 fn CopyPtrAttrs(
     comptime source: type,
     comptime size: std.builtin.Type.Pointer.Size,
@@ -44,10 +51,12 @@ pub fn asArray(comptime T: type, ptr: anytype) AsArrayReturnType(T, @TypeOf(ptr)
     return @ptrCast(@alignCast(ptr));
 }
 
+// load partial vector from buf then blend with val_vec, return blended vector
 pub fn maskedLoadVecOr(comptime T: type, val_vec: @Vector(VecLen(T), T), mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
     return @select(T, mask, maskedLoadPartVec(T, mask, buf), val_vec);
 }
 
+// load partial vector from buf then blend with zero, return blended vector
 pub fn maskedLoadVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
     var zero_vec: @Vector(VecLen(T), T) = @splat(0);
     return @select(T, mask, maskedLoadPartVec(T, mask, buf), zero_vec);
@@ -64,6 +73,8 @@ inline fn maskedLoadPartVec(comptime T: type, mask: @Vector(VecLen(T), bool), bu
     return vec;
 }
 
+// load partial vector from buf then blend with vec, store partial blended
+// vector to buf
 pub fn maskedStoreVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T, vec: @Vector(VecLen(T), T)) void {
     const int_mask = @as(std.meta.Int(.unsigned, VecLen(T)), @bitCast(mask));
     const store_len = VecLen(T) - @clz(int_mask);
@@ -84,7 +95,28 @@ pub fn maskedStoreVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T
     @memcpy(buf, blended_arr[0..store_len]);
 }
 
-pub fn tableLookupBytes(tbl: @Vector(VecLen(u8), u8), idx: @Vector(VecLen(i8), i8)) @Vector(VecLen(u8), u8) {
+// load entire vector from buf then blend with val_vec, return blended vector
+pub fn blendedLoadVecOr(comptime T: type, val_vec: @Vector(VecLen(T), T), mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
+    const vec: @Vector(VecLen(T), T) = buf[0..comptime VecLen(T)].*;
+    return @select(T, mask, vec, val_vec);
+}
+
+// load entire vector from buf then blend with zero, return blended vector
+pub fn blendedLoadVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
+    const vec: @Vector(VecLen(T), T) = buf[0..comptime VecLen(T)].*;
+    var zero_vec: @Vector(VecLen(T), T) = @splat(0);
+    return @select(T, mask, vec, zero_vec);
+}
+
+// load entire vector from buf then blend with vec, store entire blended
+// vector to buf.
+pub fn blendedStoreVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T, vec: @Vector(VecLen(T), T)) void {
+    var blend_vec: @Vector(VecLen(T), T) = buf[0..comptime VecLen(T)].*;
+    blend_vec = @select(T, mask, vec, blend_vec);
+    buf[0..comptime VecLen(T)].* = blend_vec;
+}
+
+pub fn tableLookupBytes(tbl: @Vector(VecLen(u8), u8), idx: @Vector(VecLen(i8), i8)) @TypeOf(tbl) {
     comptime var i = 0;
     var out_vec: @Vector(VecLen(u8), u8) = undefined;
 

@@ -78,7 +78,7 @@ pub fn simdSample() !void {
     const stdin = std.io.getStdIn().reader();
     const stdout = std.io.getStdOut().writer();
     var bias_str: [8]u8 = undefined;
-    try stdout.print("Please input a bias string:\n", .{});
+    try stdout.print("Please input a start number:\n", .{});
     const readed_str = try stdin.readUntilDelimiter(&bias_str, LINE_END_DELIM);
     const bias = try std.fmt.parseInt(u32, readed_str, 10);
     std.debug.print("User input: {d}\n", .{bias});

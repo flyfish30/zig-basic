@@ -43,6 +43,14 @@ pub fn VecChild(comptime T: type) type {
     return std.meta.Child(T);
 }
 
+pub fn VecNTuple(comptime N: usize, comptime T: type) type {
+    var fields: [N]type = undefined;
+    for (&fields) |*field| {
+        field.* = @Vector(VecLen(T), T);
+    }
+    return std.meta.Tuple(&fields);
+}
+
 pub fn isBitsPackedLeft(int_mask: anytype) bool {
     const info = @typeInfo(@TypeOf(int_mask));
     if (!(info == .Int or

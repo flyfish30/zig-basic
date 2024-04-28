@@ -25,7 +25,7 @@ pub fn main() !void {
     try sd.simdSample();
 
     bitonicSortSample();
-    vqsortSample();
+    try vqsortSample();
 
     if (std.os.argv.len > 1) {
         try img.readAndProcessImage(std.mem.span(std.os.argv[1]));
@@ -42,22 +42,31 @@ fn bitonicSortSample() void {
     var vec_int: simd.VecType(IntType) = array_int;
     std.debug.print("original vec_int is: {any}\n", .{vec_int});
 
-    vec_int = bisort.bitonicSort1V(IntType, vec_int);
+    var vecn_tuple: simd.VecNTuple(1, IntType) = undefined;
+    vecn_tuple[0] = vec_int;
+    vecn_tuple = bisort.sortNVecs(1, IntType, vecn_tuple);
+    vec_int = vecn_tuple[0];
     std.debug.print("sorted vec_int is: {any}\n", .{vec_int});
     return;
 }
 
-fn vqsortSample() void {
-    const IntType = u32;
+fn vqsortSample() !void {
+    const IntType = u16;
     var prnd = std.rand.DefaultPrng.init(83751737);
-    var array_int: [VecLen(IntType)]IntType = undefined;
-    for (&array_int) |*a| {
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    var array_int = try allocator.alloc(IntType, 3749);
+    defer allocator.free(array_int);
+    for (array_int) |*a| {
         a.* = prnd.random().int(IntType);
     }
     array_int[VecLen(IntType) - 1] = 5;
     std.debug.print("original array_int is: {any}\n", .{array_int});
 
-    vqsort.vqsort(IntType, array_int[0 .. VecLen(IntType) - 1]);
+    vqsort.vqsort(IntType, array_int);
+    const is_sorted = vqsort.isSorted(IntType, array_int);
     std.debug.print("vqsort array_int is: {any}\n", .{array_int});
+    std.debug.print("vqsort array_int is_sorted={any}\n", .{is_sorted});
     return;
 }

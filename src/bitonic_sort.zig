@@ -1,10 +1,23 @@
+// TODO: rename to sort_vector.zig
+//
 const std = @import("std");
 const simd = @import("simd_core.zig");
 
 const VecLen = simd.VecLen;
 const VecType = simd.VecType;
+const VecNTuple = simd.VecNTuple;
 
-pub fn bitonicSort1V(comptime T: type, vec: VecType(T)) VecType(T) {
+pub fn sortNVecs(comptime N: usize, comptime T: type, vtuple: VecNTuple(N, T)) VecNTuple(N, T) {
+    var ret_tuple: VecNTuple(N, T) = undefined;
+    switch (N) {
+        1 => ret_tuple[0] = bitonicSort1V(T, vtuple[0]),
+        else => @compileError(std.fmt.comptimePrint("Not support {d} vectors to sort", .{N})),
+    }
+
+    return ret_tuple;
+}
+
+fn bitonicSort1V(comptime T: type, vec: VecType(T)) VecType(T) {
     const dummy_vec: VecType(T) = undefined;
     var sorted_vec: VecType(T) = vec;
 

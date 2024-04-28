@@ -21,6 +21,10 @@ pub fn packSelectLeft(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bo
     return packSelect(vec, mask)[0];
 }
 
+pub fn packSelectRight(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bool)) @TypeOf(vec) {
+    return packSelect(vec, mask)[1];
+}
+
 pub fn packSelect(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bool)) Pair(@TypeOf(vec)) {
     return packSelectGeneric(vec, mask);
 }
@@ -46,7 +50,7 @@ fn packSelectGeneric(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), boo
             const vec0_pair = packSelectVec128(std.simd.extract(vec, 0, vecLen / 2), mask0);
             const vec1_pair = packSelectVec128(std.simd.extract(vec, vecLen / 2, vecLen / 2), mask1);
 
-            var vec_lane: [vecLen * 2]Child align(64) = undefined;
+            var vec_lane: [vecLen * 2]Child align(32) = undefined;
             vec_lane[0 .. vecLen / 2].* = vec0_pair[0];
             vec_lane[count0..][0 .. vecLen / 2].* = vec1_pair[0];
             vec_lane[vecLen * 3 / 2 .. vecLen * 2].* = vec1_pair[1];
@@ -75,9 +79,9 @@ fn packSelectVec128(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bool
             const vec1: @Vector(8, u8) = @bitCast(std.simd.extract(pack_2vec, 8, 8));
 
             // vec0 and vec1 layout is bellow
-            // packSelect left   <-- | -->      packSelect right
-            // [ 0, 1, .. count0 - 1,  count0, count0 + 1, .., 7 ]
-            var vec_lane: [vecLen * 2]Child align(64) = undefined;
+            // packSelect left   <-- | -->   packSelect right
+            // [ 0, 1, .. count - 1,  count, count + 1, .., 7 ]
+            var vec_lane: [vecLen * 2]Child align(32) = undefined;
             vec_lane[0 .. vecLen / 2].* = vec0;
             vec_lane[count0..][0 .. vecLen / 2].* = vec1;
             vec_lane[vecLen * 3 / 2 .. vecLen * 2].* = vec1;
