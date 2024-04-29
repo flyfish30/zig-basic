@@ -47,14 +47,14 @@ pub fn build(b: *std.Build) void {
         });
     }
 
-    // the native cpu_arch is null, so we should detect current cpu_arch
-    const target_info = std.zig.system.NativeTargetInfo.detect(target) catch
-        @panic("Couldn't detect native target info");
-    if (target_info.target.cpu.arch == .x86_64) {
+    if (target.result.cpu.arch == .x86_64) {
         exe.addIncludePath(.{ .path = "./inc" });
         const cfiles = [_][]const u8{"src/x86_64_intrins.c"};
         const cflags = [_][]const u8{"-O2"};
-        exe.addCSourceFiles(&cfiles, &cflags);
+        exe.addCSourceFiles(.{
+            .files = &cfiles,
+            .flags = &cflags,
+        });
     }
 
     // This declares intent for the executable to be installed into the

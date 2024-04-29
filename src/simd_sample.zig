@@ -159,7 +159,7 @@ pub inline fn combine(vec1: @Vector(32, u32), vec2: @TypeOf(vec1)) @Vector(64, u
     std.debug.print("vec_slice[0..N]: {any}\n", .{vec_slice});
     @memcpy(vec_slice[N .. 2 * N], vec2_slice);
     std.debug.print("vec_slice[N..2*N]: {any}\n", .{vec_slice});
-    var vec_pair: @Vector(64, u32) = pair_arr;
+    const vec_pair: @Vector(64, u32) = pair_arr;
     return vec_pair;
 }
 

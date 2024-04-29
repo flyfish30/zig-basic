@@ -58,7 +58,7 @@ pub fn maskedLoadVecOr(comptime T: type, val_vec: @Vector(VecLen(T), T), mask: @
 
 // load partial vector from buf then blend with zero, return blended vector
 pub fn maskedLoadVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
-    var zero_vec: @Vector(VecLen(T), T) = @splat(0);
+    const zero_vec: @Vector(VecLen(T), T) = @splat(0);
     return @select(T, mask, maskedLoadPartVec(T, mask, buf), zero_vec);
 }
 
@@ -104,7 +104,7 @@ pub fn blendedLoadVecOr(comptime T: type, val_vec: @Vector(VecLen(T), T), mask: 
 // load entire vector from buf then blend with zero, return blended vector
 pub fn blendedLoadVec(comptime T: type, mask: @Vector(VecLen(T), bool), buf: []T) @Vector(VecLen(T), T) {
     const vec: @Vector(VecLen(T), T) = buf[0..comptime VecLen(T)].*;
-    var zero_vec: @Vector(VecLen(T), T) = @splat(0);
+    const zero_vec: @Vector(VecLen(T), T) = @splat(0);
     return @select(T, mask, vec, zero_vec);
 }
 
