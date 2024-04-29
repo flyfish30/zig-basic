@@ -1,5 +1,3 @@
-// TODO: rename to sort_vector.zig
-//
 const std = @import("std");
 const simd = @import("simd_core.zig");
 

@@ -1,9 +1,8 @@
-// TODO: rename to vqsort.zig
 const std = @import("std");
 const builtin = @import("builtin");
 const simd = @import("simd_core.zig");
 const psel = @import("pack_select.zig");
-const bisort = @import("bitonic_sort.zig");
+const sortv = @import("sort_vectors.zig");
 
 const assert = std.debug.assert;
 
@@ -107,7 +106,7 @@ fn sortSmallBuf(comptime T: type, buf: []T, num: usize, comptime border: BorderS
     } else {
         vecn_tuple[0] = simd.maskedLoadVecOr(T, pad_vec, mask, buf[0..num]);
     }
-    vecn_tuple = bisort.sortNVecs(1, T, vecn_tuple);
+    vecn_tuple = sortv.sortNVecs(1, T, vecn_tuple);
     if (border == .safed) {
         // We has enough space to store vector, so use blendedStoreVecOr function
         simd.blendedStoreVec(T, mask, buf, vecn_tuple[0]);

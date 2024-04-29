@@ -3,8 +3,8 @@ const misc = @import("base_examples.zig");
 const img = @import("image_processing.zig");
 const sd = @import("simd_sample.zig");
 const simd = @import("simd_core.zig");
-const bisort = @import("bitonic_sort.zig");
-const vqsort = @import("vec_qsort.zig");
+const sortv = @import("sort_vectors.zig");
+const vqsort = @import("vqsort.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -44,7 +44,7 @@ fn bitonicSortSample() void {
 
     var vecn_tuple: simd.VecNTuple(1, IntType) = undefined;
     vecn_tuple[0] = vec_int;
-    vecn_tuple = bisort.sortNVecs(1, IntType, vecn_tuple);
+    vecn_tuple = sortv.sortNVecs(1, IntType, vecn_tuple);
     vec_int = vecn_tuple[0];
     std.debug.print("sorted vec_int is: {any}\n", .{vec_int});
     return;
