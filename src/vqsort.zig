@@ -63,7 +63,7 @@ fn vqsortRec(comptime T: type, buf: []T, start: usize, num: usize, remLevels: us
     }
 
     const pivot = getPivotNSamples(T, buf[start .. start + num]);
-    const mid = partition(T, buf, start, num, pivot);
+    const mid = partition(T, buf, start, num, pivot, .unsafed);
     if (mid + VecLen(T) <= buf.len) {
         vqsortRecSafe(T, buf, start, mid - start, remLevels - 1);
     } else {
@@ -85,32 +85,37 @@ fn vqsortRecSafe(comptime T: type, buf: []T, start: usize, num: usize, remLevels
     }
 
     const pivot = getPivotNSamples(T, buf[start .. start + num]);
-    const mid = partition(T, buf, start, num, pivot);
+    const mid = partition(T, buf, start, num, pivot, .safed);
     vqsortRecSafe(T, buf, start, mid - start, remLevels - 1);
     vqsortRecSafe(T, buf, mid, start + num - mid, remLevels - 1);
 }
 
 fn sortSmallBuf(comptime T: type, buf: []T, num: usize, comptime border: BorderSafe) void {
+    const N = comptime VecLen(T);
     var vecn_tuple: VecNTuple(1, T) = undefined;
-    const asc_idx = std.simd.iota(usize, VecLen(T));
-    const mask = asc_idx < @as(@Vector(VecLen(T), u16), @splat(@intCast(num)));
+    const asc_idx = std.simd.iota(usize, N);
+    const mask = asc_idx < @as(@Vector(N, u16), @splat(@intCast(num)));
     const pad = switch (@typeInfo(T)) {
         .Int, .ComptimeInt => std.math.maxInt(T),
         .Float, .ComptimeFloat => std.math.floatMax,
         else => @compileError("bad type"),
     };
-    const pad_vec: @Vector(VecLen(T), T) = @splat(pad);
+    const pad_vec: @Vector(N, T) = @splat(pad);
     if (border == .safed) {
-        // We has enough space to laod vector, so use blendedLoadVecOr function
-        vecn_tuple[0] = simd.blendedLoadVecOr(T, pad_vec, mask, buf);
+        // It has enough space to load vector, so use blendedLoadVecOr function
+        vecn_tuple[0] = simd.blendedLoadVecOr(T, pad_vec, mask, buf[0..N]);
     } else {
+        // It has not enough space to load vector, use maskedLoadVecOr function
+        // to avoid reading past the end.
         vecn_tuple[0] = simd.maskedLoadVecOr(T, pad_vec, mask, buf[0..num]);
     }
     vecn_tuple = sortv.sortNVecs(1, T, vecn_tuple);
     if (border == .safed) {
-        // We has enough space to store vector, so use blendedStoreVecOr function
-        simd.blendedStoreVec(T, mask, buf, vecn_tuple[0]);
+        // It has enough space to store vector, so use blendedStoreVec function
+        simd.blendedStoreVec(T, mask, buf[0..N], vecn_tuple[0]);
     } else {
+        // It has not enough space to store vector, use maskedStoreVec function
+        // to avoid writing past the end.
         simd.maskedStoreVec(T, mask, buf[0..num], vecn_tuple[0]);
     }
     return;
@@ -138,7 +143,7 @@ fn sortSmallBuf(comptime T: type, buf: []T, num: usize, comptime border: BorderS
 //                          \/                  \/                      \/
 //                         readL               readR                   num
 //
-fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T) usize {
+fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T, comptime border: BorderSafe) usize {
     // number of vector lanes
     const N = comptime VecLen(T);
 
@@ -174,7 +179,11 @@ fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T) usi
                 else => @compileError("bad type"),
             };
             const pad_vec: @Vector(VecLen(T), T) = @splat(pad);
-            vlast = simd.maskedLoadVecOr(T, pad_vec, part_mask, buf[readL .. readL + num_irreg]);
+            if (border == .safed) {
+                vlast = simd.blendedLoadVecOr(T, pad_vec, part_mask, buf[readL .. readL + N]);
+            } else {
+                vlast = simd.maskedLoadVecOr(T, pad_vec, part_mask, buf[readL .. readL + num_irreg]);
+            }
             readL += num_irreg;
         }
 
@@ -197,7 +206,7 @@ fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T) usi
         if (num_irreg > 0) {
             // Use function lastStoreLeftRight for residual unpartitioned data less
             // than the size of a vector.
-            lastStoreLeftRight(T, vlast, pivot, buf, &writeL, &remaining);
+            lastStoreLeftRight(T, vlast, pivot, buf, &writeL, &remaining, border);
         }
 
         // std.debug.print("after last vector  writeL={d}\n", .{ writeL});
@@ -328,7 +337,11 @@ fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T) usi
             else => @compileError("bad type"),
         };
         const pad_vec: @Vector(VecLen(T), T) = @splat(pad);
-        vlast = simd.maskedLoadVecOr(T, pad_vec, part_mask, buf[readL .. readL + num_irreg]);
+        if (border == .safed) {
+            vlast = simd.blendedLoadVecOr(T, pad_vec, part_mask, buf[readL .. readL + N]);
+        } else {
+            vlast = simd.maskedLoadVecOr(T, pad_vec, part_mask, buf[readL .. readL + num_irreg]);
+        }
         readL += num_irreg;
     }
 
@@ -351,7 +364,7 @@ fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T) usi
     if (num_irreg > 0) {
         // Use function lastStoreLeftRight for residual unpartitioned data less
         // than the size of a vector.
-        lastStoreLeftRight(T, vlast, pivot, buf, &writeL, &remaining);
+        lastStoreLeftRight(T, vlast, pivot, buf, &writeL, &remaining, border);
     }
 
     // Ensure the all regualar data had been partitioned, the remaining
@@ -369,14 +382,14 @@ fn storeLeftRightN(comptime N: usize, comptime T: type, vtuple: VecNTuple(N, T),
 
 fn storeLeftRight(comptime T: type, vec: @Vector(VecLen(T), T), pivot: T, buf: []T, writeL: *usize, remaining: *usize) void {
     const N = comptime VecLen(T);
-    const mask = vec <= @as(@Vector(VecLen(T), T), @splat(pivot));
-    const int_mask = @as(std.meta.Int(.unsigned, VecLen(T)), @bitCast(mask));
+    const mask = vec <= @as(@Vector(N, T), @splat(pivot));
+    const int_mask = @as(std.meta.Int(.unsigned, N), @bitCast(mask));
     const num_left = @popCount(int_mask);
 
     // ensure the remain space is large than 2 * VecLen(T), so we can store
     // entire vector to buf.
-    // assert(remaining.* >= 2 * VecLen(T));
-    remaining.* -= VecLen(T);
+    // assert(remaining.* >= 2 * N);
+    remaining.* -= N;
     const pack_pair = psel.packSelect(vec, mask);
 
     // std.debug.print("storeLeftRight vec={any}\n", .{vec});
@@ -395,11 +408,11 @@ fn storeLeftRight(comptime T: type, vec: @Vector(VecLen(T), T), pivot: T, buf: [
 // entire vector.
 fn blendedStoreLeftRight(comptime T: type, vec: @Vector(VecLen(T), T), pivot: T, buf: []T, writeL: *usize, remaining: *usize) void {
     const N = comptime VecLen(T);
-    const mask = vec <= @as(@Vector(VecLen(T), T), @splat(pivot));
-    const int_mask = @as(std.meta.Int(.unsigned, VecLen(T)), @bitCast(mask));
+    const mask = vec <= @as(@Vector(N, T), @splat(pivot));
+    const int_mask = @as(std.meta.Int(.unsigned, N), @bitCast(mask));
     const num_left = @popCount(int_mask);
 
-    remaining.* -= VecLen(T);
+    remaining.* -= N;
     const pack_pair = psel.packSelect(vec, mask);
 
     // std.debug.print("blendedStoreLeftRight vec={any}\n", .{vec});
@@ -416,9 +429,10 @@ fn blendedStoreLeftRight(comptime T: type, vec: @Vector(VecLen(T), T), pivot: T,
 
 // For the last vectors, we can not use blendedLeftRight because it might write
 // past the end. We must use maskedStoreVec to store partial vector.
-fn lastStoreLeftRight(comptime T: type, vec: @Vector(VecLen(T), T), pivot: T, buf: []T, writeL: *usize, remaining: *usize) void {
-    const mask = vec <= @as(@Vector(VecLen(T), T), @splat(pivot));
-    const int_mask = @as(std.meta.Int(.unsigned, VecLen(T)), @bitCast(mask));
+fn lastStoreLeftRight(comptime T: type, vec: @Vector(VecLen(T), T), pivot: T, buf: []T, writeL: *usize, remaining: *usize, comptime border: BorderSafe) void {
+    const N = comptime VecLen(T);
+    const mask = vec <= @as(@Vector(N, T), @splat(pivot));
+    const int_mask = @as(std.meta.Int(.unsigned, N), @bitCast(mask));
     const num_left = @popCount(int_mask);
 
     // std.debug.print("lastStoreLeftRight vlast={any}\n", .{vec});
@@ -428,9 +442,13 @@ fn lastStoreLeftRight(comptime T: type, vec: @Vector(VecLen(T), T), pivot: T, bu
     const left_mask = simd.maskFirstN(T, num_left);
     const pack_comb = @select(T, left_mask, pack_pair[0], pack_pair[1]);
 
-    assert(remaining.* < VecLen(T));
+    assert(remaining.* < N);
     const part_mask = simd.maskFirstN(T, remaining.*);
-    simd.maskedStoreVec(T, part_mask, buf[writeL.*..][0..remaining.*], pack_comb);
+    if (border == .safed) {
+        simd.blendedStoreVec(T, part_mask, buf[writeL.*..][0..N], pack_comb);
+    } else {
+        simd.maskedStoreVec(T, part_mask, buf[writeL.*..][0..remaining.*], pack_comb);
+    }
     writeL.* += num_left;
     remaining.* = 0;
 }
