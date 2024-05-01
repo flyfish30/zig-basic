@@ -21,7 +21,7 @@ pub const U16x8 = @Vector(8, u16);
 pub const I32x4x4 = @Vector(16, u32);
 pub const U32x4x4 = @Vector(16, u32);
 
-pub const VEC_BITS_LEN = (std.simd.suggestVectorLength(u8) orelse 128) * @bitSizeOf(u8);
+pub const VEC_BITS_LEN = (std.simd.suggestVectorLength(u8) orelse 16) * @bitSizeOf(u8);
 
 pub fn VecLen(comptime T: type) usize {
     return VEC_BITS_LEN / @bitSizeOf(T);

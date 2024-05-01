@@ -24,28 +24,13 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    exe.addIncludePath(.{ .path = "libs/zstbi/libs/stbi" });
-    exe.linkLibC();
-    if (optimize == .Debug) {
-        // TODO: Workaround for Zig bug.
-        exe.addCSourceFile(.{
-            .file = .{ .path = "libs/zstbi/src/zstbi.c" },
-            .flags = &.{
-                "-std=c99",
-                "-fno-sanitize=undefined",
-                "-g",
-                "-O0",
-            },
-        });
-    } else {
-        exe.addCSourceFile(.{
-            .file = .{ .path = "libs/zstbi/src/zstbi.c" },
-            .flags = &.{
-                "-std=c99",
-                "-fno-sanitize=undefined",
-            },
-        });
-    }
+    // add zstbi package
+    const zstbi = b.dependency("zstbi", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("zstbi", zstbi.module("root"));
+    exe.linkLibrary(zstbi.artifact("zstbi"));
 
     if (target.result.cpu.arch == .x86_64) {
         exe.addIncludePath(.{ .path = "./inc" });

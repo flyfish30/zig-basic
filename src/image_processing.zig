@@ -1,5 +1,5 @@
 const std = @import("std");
-const zstbi = @import("zstbi.zig");
+const zstbi = @import("zstbi");
 
 pub fn readAndProcessImage(path: []u8) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -25,7 +25,7 @@ pub fn readAndProcessImage(path: []u8) !void {
     const index = std.mem.lastIndexOfScalar(u8, base, '.') orelse base.len;
     const small_base = try std.mem.concat(allocator, u8, &[_][]const u8{ base[0..index], "_small", base[index..] });
     const small_path = try std.fs.path.joinZ(allocator, &[_][]const u8{ dir, small_base });
-    std.debug.print("image info: {any}\n", .{small_image});
+    // std.debug.print("image info: {any}\n", .{small_image});
 
     try zstbi.Image.writeToFile(small_image, small_path, .{ .jpg = .{ .quality = 95 } });
 }

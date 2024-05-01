@@ -38,7 +38,6 @@ pub fn vqsort(comptime T: type, buf: []T) void {
         return;
     }
 
-    // Guanteed to have at least one vector length space
     vqsortRec(T, buf, 0, buf.len, maxLevels);
 }
 
@@ -155,8 +154,8 @@ fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T, com
     var remaining = num; // writeR - writeL
     var num_irreg = num;
 
-    std.debug.print("partition num={d} pivot={d}, start={d}\n", .{ num, pivot, start });
-    std.debug.print("partition readL={d}, readR={d}\n", .{ readL, readR });
+    // std.debug.print("partition num={d} pivot={d}, start={d}\n", .{ num, pivot, start });
+    // std.debug.print("partition readL={d}, readR={d}\n", .{ readL, readR });
     if (num < 2 * N_UNROLL * N) {
         var vn_arr: [2 * N_UNROLL]@Vector(N, T) = undefined;
         // writeR = writeL + remaining;

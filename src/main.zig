@@ -62,11 +62,11 @@ fn vqsortSample() !void {
         a.* = prnd.random().int(IntType);
     }
     array_int[VecLen(IntType) - 1] = 5;
-    std.debug.print("original array_int is: {any}\n", .{array_int});
+    // std.debug.print("original array_int is: {any}\n", .{array_int});
 
     vqsort.vqsort(IntType, array_int);
     const is_sorted = vqsort.isSorted(IntType, array_int);
-    std.debug.print("vqsort array_int is: {any}\n", .{array_int});
+    // std.debug.print("vqsort array_int is: {any}\n", .{array_int});
     std.debug.print("vqsort array_int is_sorted={any}\n", .{is_sorted});
     return;
 }

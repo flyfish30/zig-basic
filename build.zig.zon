@@ -1,0 +1,12 @@
+.{
+    .name = "basic-example",
+    .version = "0.1.0",
+    .dependencies = .{
+        .zstbi = .{ .path = "libs/zstbi" },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
