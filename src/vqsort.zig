@@ -154,8 +154,8 @@ fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T, com
     var remaining = num; // writeR - writeL
     var num_irreg = num;
 
-    // std.debug.print("partition num={d} pivot={d}, start={d}\n", .{ num, pivot, start });
-    // std.debug.print("partition readL={d}, readR={d}\n", .{ readL, readR });
+    std.debug.print("partition num={d} pivot={d}, start={d}\n", .{ num, pivot, start });
+    std.debug.print("partition readL={d}, readR={d}\n", .{ readL, readR });
     if (num < 2 * N_UNROLL * N) {
         var vn_arr: [2 * N_UNROLL]@Vector(N, T) = undefined;
         // writeR = writeL + remaining;
@@ -200,7 +200,7 @@ fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T, com
         // StoreLeftRight may overwrite partitioned data
         blendedStoreLeftRight(T, vn_arr[j], pivot, buf, &writeL, &remaining);
 
-        // std.debug.print("last vector writeL={d}, remaining={d}, j={d}\n", .{ writeL, remaining, j });
+        std.debug.print("last vector writeL={d}, remaining={d}, j={d}\n", .{ writeL, remaining, j });
         assert(remaining == num_irreg);
         if (num_irreg > 0) {
             // Use function lastStoreLeftRight for residual unpartitioned data less
@@ -233,7 +233,7 @@ fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T, com
     vRn_tuple[1] = buf[readR + 1 * N ..][0..N].*;
     vRn_tuple[2] = buf[readR + 2 * N ..][0..N].*;
     vRn_tuple[3] = buf[readR + 3 * N ..][0..N].*;
-    // std.debug.print("partition before loop num_irreg={d}, readL={d}, readR={d}\n", .{ num_irreg, readL, readR });
+    std.debug.print("partition before loop num_irreg={d}, readL={d}, readR={d}\n", .{ num_irreg, readL, readR });
 
     // In the main loop body below we choose a side, load some elements out of the
     // vector and move either `readL` or `readR`. Next we call into StoreLeftRight

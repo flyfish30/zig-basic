@@ -284,8 +284,8 @@ const indices64x2: [4 * 16]u8 align(16) = .{
 fn idxFromBits128(comptime T: type, mask_bits: u64) @Vector(16, u8) {
     switch (@sizeOf(T)) {
         1 => {
-            const mask0_bits = mask_bits & 0xff;
-            const mask1_bits = (mask_bits >> 8) & 0xff;
+            const mask0_bits = @as(usize, @intCast(mask_bits & 0xff));
+            const mask1_bits = @as(usize, @intCast((mask_bits >> 8) & 0xff));
             const idx0: @Vector(8, u8) = table8x16[mask0_bits * 8 ..][0..8].*;
             var idx1: @Vector(8, u8) = table8x16[mask1_bits * 8 ..][0..8].*;
             idx1 += @splat(8);
@@ -294,15 +294,15 @@ fn idxFromBits128(comptime T: type, mask_bits: u64) @Vector(16, u8) {
         2 => {
             // TODO: It is only for little-endian, it should to implement
             // it for big-endian
-            const byte_idx: @Vector(8, u8) = table16x8[mask_bits * 8 ..][0..8].*;
+            const byte_idx: @Vector(8, u8) = table16x8[@intCast(mask_bits * 8) ..][0..8].*;
             const pairs: @Vector(8, u16) = @bitCast(std.simd.interlace([_]@Vector(8, u8){ byte_idx, byte_idx }));
             return @bitCast(pairs + @as(@Vector(8, u16), @splat(0x100)));
         },
         4 => {
-            return indices32x4[mask_bits * 16 ..][0..16].*;
+            return indices32x4[@intCast(mask_bits * 16) ..][0..16].*;
         },
         8 => {
-            return indices64x2[mask_bits * 16 ..][0..16].*;
+            return indices64x2[@intCast(mask_bits * 16) ..][0..16].*;
         },
         else => @compileError("Invalid type for idxFromBits" ++ @typeName(T)),
     }

@@ -7,6 +7,7 @@ const arch = target.cpu.arch;
 pub usingnamespace switch (arch) {
     .x86_64 => @import("simd_x86_64.zig"),
     .aarch64 => @import("simd_aarch64.zig"),
+    // .riscv64 => @import("simd_riscv64.zig"),
     .wasm32 => @import("simd_wasm32.zig"),
     else => @import("simd_generic.zig"),
 };

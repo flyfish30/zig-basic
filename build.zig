@@ -32,9 +32,23 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("zstbi", zstbi.module("root"));
     exe.linkLibrary(zstbi.artifact("zstbi"));
 
-    if (target.result.cpu.arch == .x86_64) {
+    var has_intrins = false;
+    var intrins_file: []const u8 = undefined;
+    switch (target.result.cpu.arch) {
+        .x86_64 => {
+            has_intrins = true;
+            intrins_file = "src/x86_64_intrins.c";
+        },
+        .wasm32 => {
+            has_intrins = true;
+            intrins_file = "src/wasm_simd128_intrins.c";
+        },
+        else => {},
+    }
+
+    if (has_intrins) {
         exe.addIncludePath(.{ .path = "./inc" });
-        const cfiles = [_][]const u8{"src/x86_64_intrins.c"};
+        const cfiles = [_][]const u8{intrins_file};
         const cflags = [_][]const u8{"-O2"};
         exe.addCSourceFiles(.{
             .files = &cfiles,
