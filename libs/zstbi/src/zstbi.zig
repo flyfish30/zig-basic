@@ -261,7 +261,7 @@ pub const Image = struct {
         const new_bytes_per_row = new_width * image.num_components * image.bytes_per_component;
         const new_size = new_height * new_bytes_per_row;
         const new_data = @as([*]u8, @ptrCast(zstbiMalloc(new_size)));
-        stbir_resize_uint8(
+        const result = stbir_resize_uint8(
             image.data.ptr,
             @as(c_int, @intCast(image.width)),
             @as(c_int, @intCast(image.height)),
@@ -272,6 +272,7 @@ pub const Image = struct {
             0,
             @as(c_int, @intCast(image.num_components)),
         );
+        _ = result;
         return .{
             .data = new_data[0..new_size],
             .width = new_width,
@@ -519,7 +520,7 @@ extern fn stbir_resize_uint8(
     output_h: c_int,
     output_stride_in_bytes: c_int,
     num_channels: c_int,
-) void;
+) c_int;
 
 extern fn stbi_write_jpg(
     filename: [*:0]const u8,
