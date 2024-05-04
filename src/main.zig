@@ -51,7 +51,7 @@ fn bitonicSortSample() void {
 }
 
 fn vqsortSample() !void {
-    const IntType = u32;
+    const IntType = u16;
     var prnd = std.rand.DefaultPrng.init(83751737);
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
