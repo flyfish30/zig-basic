@@ -3,16 +3,15 @@ const simd = @import("simd_core.zig");
 
 const VecLen = simd.VecLen;
 const VecType = simd.VecType;
-const VecNTuple = simd.VecNTuple;
+const VecTupleN = simd.VecTupleN;
 
-pub fn sortNVecs(comptime N: usize, comptime T: type, vtuple: VecNTuple(N, T)) VecNTuple(N, T) {
-    var ret_tuple: VecNTuple(N, T) = undefined;
+pub fn sortNVecs(comptime N: usize, comptime T: type, vtuple: *VecTupleN(N, T)) void {
     switch (N) {
-        1 => ret_tuple[0] = bitonicSort1V(T, vtuple[0]),
+        1 => vtuple.*[0] = bitonicSort1V(T, vtuple.*[0]),
+        4 => sortRow4(T, vtuple),
+        8 => sortRow8(T, vtuple),
         else => @compileError(std.fmt.comptimePrint("Not support {d} vectors to sort", .{N})),
     }
-
-    return ret_tuple;
 }
 
 fn bitonicSort1V(comptime T: type, vec: VecType(T)) VecType(T) {
@@ -96,4 +95,12 @@ fn getPermMaskFlagArray(comptime T: type, stage: BisortStage) struct { []@Vector
     }
 
     return .{ &mask_arr, &fftt_flag_arr };
+}
+
+fn sortRow4(comptime T: type, vtuple: VecTupleN(4, T)) VecTupleN(4, T) {
+    return vtuple;
+}
+
+fn sortRow8(comptime T: type, vtuple: VecTupleN(8, T)) VecTupleN(8, T) {
+    return vtuple;
 }

@@ -44,12 +44,42 @@ pub fn VecChild(comptime T: type) type {
     return std.meta.Child(T);
 }
 
-pub fn VecNTuple(comptime N: usize, comptime T: type) type {
+pub fn VecTupleN(comptime N: usize, comptime T: type) type {
     var fields: [N]type = undefined;
     for (&fields) |*field| {
         field.* = @Vector(VecLen(T), T);
     }
     return std.meta.Tuple(&fields);
+}
+
+fn CopyPtrAttrs(
+    comptime source: type,
+    comptime size: std.builtin.Type.Pointer.Size,
+    comptime child: type,
+) type {
+    const info = @typeInfo(source).Pointer;
+    return @Type(.{
+        .Pointer = .{
+            .size = size,
+            .is_const = info.is_const,
+            .is_volatile = info.is_volatile,
+            .is_allowzero = info.is_allowzero,
+            .alignment = info.alignment,
+            .address_space = info.address_space,
+            .child = child,
+            .sentinel = null,
+        },
+    });
+}
+
+fn AsArrayReturnType(comptime T: type, comptime P: type) type {
+    const size = @sizeOf(std.meta.Child(P));
+    return CopyPtrAttrs(P, .One, [size / @sizeOf(T)]T);
+}
+
+/// Given a pointer to a single item, returns a slice of the underlying type, preserving pointer attributes.
+pub fn asSlice(comptime T: type, ptr: anytype) AsArrayReturnType(T, @TypeOf(ptr)) {
+    return @ptrCast(@alignCast(ptr));
 }
 
 pub fn isBitsPackedLeft(int_mask: anytype) bool {

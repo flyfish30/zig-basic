@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const simd = @import("simd_core.zig");
 const psel = @import("pack_select.zig");
 const sortv = @import("sort_vectors.zig");
+const sortn = @import("sorting_networks.zig");
 
 const assert = std.debug.assert;
 
@@ -11,7 +12,7 @@ const VecLen = simd.VecLen;
 const VecType = simd.VecType;
 const vectorLength = simd.vectorLength;
 const VecChild = simd.VecChild;
-const VecNTuple = simd.VecNTuple;
+const VecTupleN = simd.VecTupleN;
 
 const BorderSafe = enum {
     unsafed,
@@ -91,7 +92,7 @@ fn vqsortRecSafe(comptime T: type, buf: []T, start: usize, num: usize, remLevels
 
 fn sortSmallBuf(comptime T: type, buf: []T, num: usize, comptime border: BorderSafe) void {
     const N = comptime VecLen(T);
-    var vecn_tuple: VecNTuple(1, T) = undefined;
+    var vecn_tuple: VecTupleN(1, T) = undefined;
     const asc_idx = std.simd.iota(usize, N);
     const mask = asc_idx < @as(@Vector(N, u16), @splat(@intCast(num)));
     const pad = switch (@typeInfo(T)) {
@@ -108,7 +109,7 @@ fn sortSmallBuf(comptime T: type, buf: []T, num: usize, comptime border: BorderS
         // to avoid reading past the end.
         vecn_tuple[0] = simd.maskedLoadVecOr(T, pad_vec, mask, buf[0..num]);
     }
-    vecn_tuple = sortv.sortNVecs(1, T, vecn_tuple);
+    sortv.sortNVecs(1, T, &vecn_tuple);
     if (border == .safed) {
         // It has enough space to store vector, so use blendedStoreVec function
         simd.blendedStoreVec(T, mask, buf[0..N], vecn_tuple[0]);
@@ -216,8 +217,8 @@ fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T, com
     }
 
     // else   num >= 2 * N_UNROLL * N
-    var vLn_tuple: VecNTuple(4, T) = undefined;
-    var vRn_tuple: VecNTuple(4, T) = undefined;
+    var vLn_tuple: VecTupleN(4, T) = undefined;
+    var vRn_tuple: VecTupleN(4, T) = undefined;
 
     // partition mutiple blocks, the block size is N_UNROLL * N
     num_irreg = num & (2 * N_UNROLL * N - 1);
@@ -290,7 +291,7 @@ fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T, com
 
         // std.debug.print("partition mainloop readL={d}, readR={d}\n", .{ readL, readR });
 
-        var vn_tuple: VecNTuple(4, T) = undefined;
+        var vn_tuple: VecTupleN(4, T) = undefined;
         vn_tuple[0] = buf[readCur + 0 * N ..][0..N].*;
         vn_tuple[1] = buf[readCur + 1 * N ..][0..N].*;
         vn_tuple[2] = buf[readCur + 2 * N ..][0..N].*;
@@ -372,7 +373,7 @@ fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T, com
     return writeL;
 }
 
-fn storeLeftRightN(comptime N: usize, comptime T: type, vtuple: VecNTuple(N, T), pivot: T, buf: []T, writeL: *usize, remaining: *usize) void {
+fn storeLeftRightN(comptime N: usize, comptime T: type, vtuple: VecTupleN(N, T), pivot: T, buf: []T, writeL: *usize, remaining: *usize) void {
     comptime var i = 0;
     inline while (i < N) : (i += 1) {
         storeLeftRight(T, vtuple[i], pivot, buf, writeL, remaining);
@@ -452,34 +453,20 @@ fn lastStoreLeftRight(comptime T: type, vec: @Vector(VecLen(T), T), pivot: T, bu
     remaining.* = 0;
 }
 
-fn compareLtSwap(comptime T: type, a: *T, b: *T) void {
-    const v_min: T = @min(a.*, b.*);
-    const v_max: T = @max(a.*, b.*);
-    a.* = v_min;
-    b.* = v_max;
-}
-
 fn getPivotNSamples(comptime T: type, buf: []T) T {
     const right = buf.len - 1;
     const N = 5;
     const step = @max(1, (right + N) / N);
+    var samples: [N]T = undefined;
+    comptime var i = 0;
+    inline while (i < N) : (i += 1) {
+        if (i + 1 < N) {
+            samples[i] = buf[step * i];
+        } else {
+            samples[i] = buf[right];
+        }
+    }
 
-    var samples = [_]T{ buf[0], buf[step], buf[step * 2], buf[step * 3], buf[right] };
-
-    // use sorting network for 5
-    // [(0,3),(1,4)]
-    // [(0,2),(1,3)]
-    // [(0,1),(2,4)]
-    // [(1,2),(3,4)]
-    // [(2,3)]
-    compareLtSwap(T, &samples[0], &samples[3]);
-    compareLtSwap(T, &samples[1], &samples[4]);
-    compareLtSwap(T, &samples[0], &samples[2]);
-    compareLtSwap(T, &samples[1], &samples[3]);
-    compareLtSwap(T, &samples[0], &samples[1]);
-    compareLtSwap(T, &samples[2], &samples[4]);
-    compareLtSwap(T, &samples[1], &samples[2]);
-    compareLtSwap(T, &samples[3], &samples[4]);
-    compareLtSwap(T, &samples[2], &samples[3]);
+    sortn.sort5(T, &samples);
     return samples[2];
 }

@@ -4,12 +4,17 @@ const img = @import("image_processing.zig");
 const sd = @import("simd_sample.zig");
 const simd = @import("simd_core.zig");
 const sortv = @import("sort_vectors.zig");
+const sortn = @import("sorting_networks.zig");
 const vqsort = @import("vqsort.zig");
 
 const Allocator = std.mem.Allocator;
 
 const VecLen = simd.VecLen;
 const VecType = simd.VecType;
+
+test {
+    std.testing.refAllDecls(@This());
+}
 
 // export fn _start() callconv(.C) noreturn {
 //     try @call(.auto, main, .{});
@@ -24,7 +29,7 @@ pub fn main() !void {
     try misc.baseExample();
     try sd.simdSample();
 
-    bitonicSortSample();
+    vecSortSample();
     try vqsortSample();
 
     if (std.os.argv.len > 1) {
@@ -32,7 +37,7 @@ pub fn main() !void {
     }
 }
 
-fn bitonicSortSample() void {
+fn vecSortSample() void {
     const IntType = u8;
     var prnd = std.rand.DefaultPrng.init(83751737);
     var array_int: [simd.VecLen(IntType)]IntType = undefined;
@@ -42,11 +47,13 @@ fn bitonicSortSample() void {
     var vec_int: simd.VecType(IntType) = array_int;
     std.debug.print("original vec_int is: {any}\n", .{vec_int});
 
-    var vecn_tuple: simd.VecNTuple(1, IntType) = undefined;
+    var vecn_tuple: simd.VecTupleN(1, IntType) = undefined;
     vecn_tuple[0] = vec_int;
-    vecn_tuple = sortv.sortNVecs(1, IntType, vecn_tuple);
+    sortv.sortNVecs(1, IntType, &vecn_tuple);
     vec_int = vecn_tuple[0];
     std.debug.print("sorted vec_int is: {any}\n", .{vec_int});
+    const is_sorted = vqsort.isSorted(IntType, simd.asSlice(IntType, &vec_int));
+    std.debug.print("vqsort array_int is_sorted={any}\n", .{is_sorted});
     return;
 }
 

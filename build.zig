@@ -32,21 +32,21 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("zstbi", zstbi.module("root"));
     exe.linkLibrary(zstbi.artifact("zstbi"));
 
-    var has_intrins = false;
+    var has_c_intrins = false;
     var intrins_file: []const u8 = undefined;
     switch (target.result.cpu.arch) {
         .x86_64 => {
-            has_intrins = true;
+            has_c_intrins = true;
             intrins_file = "src/x86_64_intrins.c";
         },
         .wasm32 => {
-            has_intrins = true;
+            has_c_intrins = true;
             intrins_file = "src/wasm_simd128_intrins.c";
         },
         else => {},
     }
 
-    if (has_intrins) {
+    if (has_c_intrins) {
         exe.addIncludePath(.{ .path = "./inc" });
         const cfiles = [_][]const u8{intrins_file};
         const cflags = [_][]const u8{"-O2"};
@@ -91,6 +91,20 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    // import zstbi package
+    unit_tests.root_module.addImport("zstbi", zstbi.module("root"));
+    unit_tests.linkLibrary(zstbi.artifact("zstbi"));
+
+    if (has_c_intrins) {
+        unit_tests.addIncludePath(.{ .path = "./inc" });
+        const cfiles = [_][]const u8{intrins_file};
+        const cflags = [_][]const u8{"-O2"};
+        unit_tests.addCSourceFiles(.{
+            .files = &cfiles,
+            .flags = &cflags,
+        });
+    }
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
