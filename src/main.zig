@@ -39,31 +39,40 @@ pub fn main() !void {
 
 fn vecSortSample() void {
     const IntType = u8;
+    const N = comptime VecLen(IntType);
+    const N_VECS = 16;
     var prnd = std.rand.DefaultPrng.init(83751737);
-    var array_int: [simd.VecLen(IntType)]IntType = undefined;
+    var array_int: [N*N_VECS]IntType = undefined;
     for (&array_int) |*a| {
         a.* = prnd.random().int(IntType);
     }
-    var vec_int: simd.VecType(IntType) = array_int;
-    std.debug.print("original vec_int is: {any}\n", .{vec_int});
 
-    var vecn_tuple: simd.VecTupleN(1, IntType) = undefined;
-    vecn_tuple[0] = vec_int;
-    sortv.sortNVecs(1, IntType, &vecn_tuple);
-    vec_int = vecn_tuple[0];
-    std.debug.print("sorted vec_int is: {any}\n", .{vec_int});
-    const is_sorted = vqsort.isSorted(IntType, simd.asSlice(IntType, &vec_int));
-    std.debug.print("vqsort array_int is_sorted={any}\n", .{is_sorted});
+    comptime var i = 0;
+    var vecn_tuple: [N_VECS]VecType(IntType) = undefined;
+    inline while (i < N_VECS) : (i += 1) {
+        vecn_tuple[i] = array_int[i * N ..][0 .. N].*;
+        // std.debug.print("original vec_int[{d}] is: {any}\n", .{i, vecn_tuple[i]});
+    }
+
+    sortv.sortNVecs(N_VECS, IntType, &vecn_tuple);
+
+    i = 0;
+    inline while (i < N_VECS) : (i += 1) {
+        array_int[i * N ..][0 .. N].* = vecn_tuple[i];
+        // std.debug.print("sorted vec_int[{d}] is: {any}\n", .{i, vecn_tuple[i]});
+    }
+    const is_sorted = vqsort.isSorted(IntType, simd.asSlice(IntType, &array_int));
+    std.debug.print("vecSort array_int is_sorted={any}\n", .{is_sorted});
     return;
 }
 
 fn vqsortSample() !void {
-    const IntType = u16;
+    const IntType = u8;
     var prnd = std.rand.DefaultPrng.init(83751737);
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
-    var array_int = try allocator.alloc(IntType, 3749);
+    var array_int = try allocator.alloc(IntType, 23749);
     defer allocator.free(array_int);
     for (array_int) |*a| {
         a.* = prnd.random().int(IntType);

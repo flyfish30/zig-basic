@@ -3,15 +3,21 @@ const testing = std.testing;
 const simd = @import("simd_core.zig");
 const vqsort = @import("vqsort.zig");
 
+const VecLen = simd.VecLen;
+const VecType = simd.VecType;
+
 const SortNet = [][2]u8;
 
-fn compareLtSwap(comptime T: type, a: *T, b: *T) void {
+inline fn compareLtSwap(comptime T: type, a: *T, b: *T) void {
     const v_min: T = @min(a.*, b.*);
     const v_max: T = @max(a.*, b.*);
     a.* = v_min;
     b.* = v_max;
 }
 
+/// Sort n items by use sorting networks from
+/// https://bertdobbelaere.github.io/sorting_networks.html.
+/// The parameter N must be in range [2..<=16].
 pub fn sortN2to16(comptime N: usize, comptime T: type, tuple: *[N]T) void {
     if (N < 2 and N > 16) {
         @compileError("sortN2to16 can't sort zero or too many items!");
@@ -231,7 +237,8 @@ fn sortWithNetwork(comptime T: type, comptime sort_net: SortNet, tuple: []T) voi
 }
 
 test "sortN2to16" {
-    const all_datas = [_]u8{ 61, 30, 57, 146, 190, 170, 190, 91, 146, 8, 93, 211, 100, 29, 21, 169 };
+    const all_datas = [_]u8{ 61, 30, 57, 146, 190, 170, 190, 91,
+                             146, 8, 93, 211, 100, 29, 21, 169 };
     comptime var i = 2;
     inline while (i <= 16) : (i += 1) {
         var array: [i]u8 = undefined;
@@ -240,4 +247,133 @@ test "sortN2to16" {
         const is_sorted = vqsort.isSorted(u8, &array);
         try testing.expectEqual(true, is_sorted);
     }
+}
+
+/// Sort n vectors that present as a nxm matrix items, in first, sort vectors
+/// in column-wise, then merge sorted column by use bitonic sorting networks.
+pub fn sortVecsNxM(comptime N: usize, comptime T: type, vtuple: *[N]VecType(T)) void {
+    // the M must be powers of 2
+    const M = comptime VecLen(T);
+
+    if (N < 2 or N > 16) {
+        @compileError("sortVecsNxM: the number of rows must be in range [2..<=16]");
+    }
+    if ((N & (N - 1)) != 0) {
+        @compileError("sortVecsNxM: the number of rows must be powers of 2");
+    }
+
+    if (M < 2) {
+        @compileError("sortVecsNxM: the number of cols must be greater equal 2");
+    }
+
+    sortN2to16(N, VecType(T), vtuple);
+
+    comptime var m = 2;
+    inline while (m <= M) : (m *= 2) {
+        mergeVecsNGrpM(N, m, T, vtuple);
+    }
+    return ;
+}
+
+fn mergeVecsNGrpM(comptime N: usize, comptime M: usize, comptime T: type, vtuple: *[N]VecType(T)) void {
+    const VLEN = comptime VecLen(T);
+    const asc_mask = std.simd.iota(i32, N);
+    const rev_perm_masks, const rev_fftt_flags = comptime getBisortMaskFlags(VLEN, .BisortMerge);
+    const col_perm_masks, const col_fftt_flags = comptime getBisortMaskFlags(N, .BisortMerge);
+    const dummy_vec: VecType(T) = undefined;
+    comptime var n = col_perm_masks.len;
+    comptime var grp_size = 2;
+
+    inline while (grp_size <= N) : (grp_size *= 2) {
+        comptime var i = 0;
+        n -= 1;
+        inline while (i < N) : (i += 1) {
+            if (!col_fftt_flags[n][i]) {
+                const log2_M = comptime std.math.log2_int(usize, M);
+                const M_IDX = log2_M - 1;
+                const org_idx = asc_mask[i];
+                const rev_idx = col_perm_masks[n][i];
+
+                // reverse vector with group size M
+                vtuple[rev_idx] = @shuffle(T, vtuple[rev_idx], dummy_vec, rev_perm_masks[M_IDX]);
+                compareLtSwap(VecType(T), &vtuple[org_idx], &vtuple[rev_idx]);
+            }
+        }
+    }
+
+    comptime var log2_m = std.math.log2_int(usize, M);
+    if (log2_m > 1) {
+        comptime var i = 0;
+        const m_idx = log2_m - 1;
+        inline while (i < N) : (i += 1) {
+            // Sort vector and self reversed with group size m
+            // sortPairsReverse_log2_m
+            const perm_vec = @shuffle(T, vtuple[i], dummy_vec, rev_perm_masks[m_idx]);
+            const min_vec = @min(vtuple[i], perm_vec);
+            const max_vec = @max(vtuple[i], perm_vec);
+            vtuple[i] = @select(T, rev_fftt_flags[m_idx], max_vec, min_vec);
+        }
+    }
+
+    const adj_perm_masks, const adj_fftt_flags = comptime getBisortMaskFlags(VLEN, .BisortSort);
+    inline while (log2_m > 0) : (log2_m -= 1) {
+        comptime var i = 0;
+        const m_idx = log2_m - 1;
+        inline while (i < N) : (i += 1) {
+            // Sort data in a vector with adjacent intervals of m
+            // sortPairsDistance_log2_m
+            const perm_vec = @shuffle(T, vtuple[i], dummy_vec, adj_perm_masks[m_idx]);
+            const min_vec = @min(vtuple[i], perm_vec);
+            const max_vec = @max(vtuple[i], perm_vec);
+            vtuple[i] = @select(T, adj_fftt_flags[m_idx], max_vec, min_vec);
+        }
+    }
+
+    return;
+}
+
+const BisortStage = enum(u4) {
+    BisortMerge, // Merge two monotonic sequence to a bitonic sequence
+    BisortSort, // Sort the bitonic sequence
+};
+
+/// Get masks and bit flags of the vector permutation of the bitionic sorting
+/// networks, return a tuple that has masks and bit flags
+pub fn getBisortMaskFlags(comptime N: usize, stage: BisortStage) struct { []@Vector(N, i32), []@Vector(N, bool) } {
+    const len = comptime std.math.log2_int(usize, N);
+    var mask_arr: [len]@Vector(N, i32) = undefined;
+    var fftt_flag_arr: [len]@Vector(N, bool) = undefined;
+
+    const ffff_flag: @Vector(N / 2, bool) = @splat(false);
+    const tttt_flag: @Vector(N / 2, bool) = @splat(true);
+    var ft_flags = [_]@Vector(N / 2, bool){ ffff_flag, tttt_flag };
+    var fftt_flag: @Vector(N, bool) = undefined;
+
+    const asc_index: @Vector(N, i32) = std.simd.iota(i32, N);
+    var inc_val = 1;
+    var dec_val = -1;
+    var perm_mask = asc_index;
+
+    var step = 1;
+    var i = 0;
+    while (step < N) : (step *= 2) {
+        fftt_flag = std.simd.interlace(ft_flags);
+        const inc_vec: @Vector(N, i32) = @splat(inc_val);
+        const dec_vec: @Vector(N, i32) = @splat(dec_val);
+        perm_mask = switch (stage) {
+            .BisortMerge => perm_mask + @select(i32, fftt_flag, dec_vec, inc_vec),
+            .BisortSort => asc_index + @select(i32, fftt_flag, dec_vec, inc_vec),
+        };
+
+        ft_flags[0] = std.simd.extract(fftt_flag, 0, N / 2);
+        ft_flags[1] = std.simd.extract(fftt_flag, N / 2, N / 2);
+        inc_val = inc_val * 2;
+        dec_val = dec_val * 2;
+
+        mask_arr[i] = perm_mask;
+        fftt_flag_arr[i] = fftt_flag;
+        i += 1;
+    }
+
+    return .{ &mask_arr, &fftt_flag_arr };
 }

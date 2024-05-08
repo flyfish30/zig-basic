@@ -21,20 +21,20 @@ const BorderSafe = enum {
 
 // SortConstants
 const MAX_ROWS: usize = 16;
-const MAX_COLS: usize = 16;
 //   the partition unroll number must be power of 2
 const N_UNROLL: usize = 1 << 2; // 4
 
-// maximum count for vectorize sort
-fn lenVSort(comptime T: type, comptime N: usize) usize {
-    const rows_num = if ((N / VecLen(T)) >= 4) MAX_ROWS else 8;
-    return rows_num * @min(N, MAX_COLS);
+// maximum count of data for call sortSmallBuf
+fn vsortLen(comptime T: type) usize {
+    const N = comptime VecLen(T);
+    const num_rows = if (N > 16) MAX_ROWS / 2 else MAX_ROWS;
+    return num_rows * N;
 }
 
 pub fn vqsort(comptime T: type, buf: []T) void {
     const maxLevels: usize = 60;
 
-    if (buf.len <= VecLen(T)) {
+    if (buf.len <= vsortLen(T)) {
         sortSmallBuf(T, buf, buf.len, .unsafed);
         return;
     }
@@ -57,66 +57,121 @@ pub fn isSorted(comptime T: type, buf: []T) bool {
 
 // recusive function for vqsort
 fn vqsortRec(comptime T: type, buf: []T, start: usize, num: usize, remLevels: usize) void {
-    if (num <= VecLen(T)) {
+    if (num <= vsortLen(T)) {
         sortSmallBuf(T, buf[start..], num, .unsafed);
         return;
     }
 
     const pivot = getPivotNSamples(T, buf[start .. start + num]);
-    const mid = partition(T, buf, start, num, pivot, .unsafed);
-    if (mid + VecLen(T) <= buf.len) {
-        vqsortRecSafe(T, buf, start, mid - start, remLevels - 1);
+    const bound = partition(T, buf, start, num, pivot, .unsafed);
+    if (bound + VecLen(T) <= buf.len) {
+        vqsortRecSafe(T, buf, start, bound - start, remLevels - 1);
     } else {
-        vqsortRec(T, buf, start, mid - start, remLevels - 1);
+        vqsortRec(T, buf, start, bound - start, remLevels - 1);
     }
     if (start + num + VecLen(T) <= buf.len) {
-        vqsortRecSafe(T, buf, mid, start + num - mid, remLevels - 1);
+        vqsortRecSafe(T, buf, bound, start + num - bound, remLevels - 1);
     } else {
-        vqsortRec(T, buf, mid, start + num - mid, remLevels - 1);
+        vqsortRec(T, buf, bound, start + num - bound, remLevels - 1);
     }
 }
 
 // recusive function for vqsort that has enough space to load/store vector
 // in right most element
 fn vqsortRecSafe(comptime T: type, buf: []T, start: usize, num: usize, remLevels: usize) void {
-    if (num <= VecLen(T)) {
+    if (num <= vsortLen(T)) {
         sortSmallBuf(T, buf[start..], num, .safed);
         return;
     }
 
     const pivot = getPivotNSamples(T, buf[start .. start + num]);
-    const mid = partition(T, buf, start, num, pivot, .safed);
-    vqsortRecSafe(T, buf, start, mid - start, remLevels - 1);
-    vqsortRecSafe(T, buf, mid, start + num - mid, remLevels - 1);
+    const bound = partition(T, buf, start, num, pivot, .safed);
+    vqsortRecSafe(T, buf, start, bound - start, remLevels - 1);
+    vqsortRecSafe(T, buf, bound, start + num - bound, remLevels - 1);
 }
 
 fn sortSmallBuf(comptime T: type, buf: []T, num: usize, comptime border: BorderSafe) void {
+    if (num == 0) return;
+
     const N = comptime VecLen(T);
-    var vecn_tuple: VecTupleN(1, T) = undefined;
+    const log2_num = std.math.log2_int_ceil(usize, num);
+    const log2_N = std.math.log2_int(usize, N);
+    var log2_diff: u16 = 0;
+    if (log2_num > log2_N) {
+        log2_diff = log2_num - log2_N;
+    }
+
+    switch (log2_diff) {
+        0 => sortRowsN(1, T, buf, num, border),
+        1 => sortRowsN(2, T, buf, num, border),
+        2 => sortRowsN(4, T, buf, num, border),
+        3 => sortRowsN(8, T, buf, num, border),
+        4 => sortRowsN(16, T, buf, num, border),
+        else => {
+            std.debug.print("Too many rows({d}) to sort", .{ log2_diff });
+            unreachable;
+        },
+    }
+}
+
+fn sortRowsN(comptime N_ROW: usize, comptime T: type, buf: []T, num: usize, comptime border: BorderSafe) void {
+    const N = comptime VecLen(T);
+    const num_irreg = num % N;
+    var vecn_tuple: [N_ROW]VecType(T) = undefined;
     const asc_idx = std.simd.iota(usize, N);
-    const mask = asc_idx < @as(@Vector(N, u16), @splat(@intCast(num)));
+    const mask = asc_idx < @as(@Vector(N, u16), @splat(@intCast(num_irreg)));
     const pad = switch (@typeInfo(T)) {
         .Int, .ComptimeInt => std.math.maxInt(T),
         .Float, .ComptimeFloat => std.math.floatMax,
         else => @compileError("bad type"),
     };
     const pad_vec: @Vector(N, T) = @splat(pad);
-    if (border == .safed) {
-        // It has enough space to load vector, so use blendedLoadVecOr function
-        vecn_tuple[0] = simd.blendedLoadVecOr(T, pad_vec, mask, buf[0..N]);
-    } else {
-        // It has not enough space to load vector, use maskedLoadVecOr function
-        // to avoid reading past the end.
-        vecn_tuple[0] = simd.maskedLoadVecOr(T, pad_vec, mask, buf[0..num]);
+
+    comptime var i: u16 = 0;
+    inline while (i < N_ROW / 2) : (i += 1) {
+        vecn_tuple[i] = buf[i * N .. ][0..N].*;
     }
-    sortv.sortNVecs(1, T, &vecn_tuple);
-    if (border == .safed) {
-        // It has enough space to store vector, so use blendedStoreVec function
-        simd.blendedStoreVec(T, mask, buf[0..N], vecn_tuple[0]);
-    } else {
-        // It has not enough space to store vector, use maskedStoreVec function
-        // to avoid writing past the end.
-        simd.maskedStoreVec(T, mask, buf[0..num], vecn_tuple[0]);
+
+    var j: u16 = i;
+    const floor_num_rows = num / N;
+    const ceil_num_rows = (num + N - 1) / N;
+    while (j < floor_num_rows) : (j += 1) {
+        vecn_tuple[j] = buf[j * N .. ][0..N].*;
+    }
+    while (j < ceil_num_rows) : (j += 1) {
+        if (border == .safed) {
+            // It has enough space to load vector, so use blendedLoadVecOr function
+            vecn_tuple[j] = simd.blendedLoadVecOr(T, pad_vec, mask, buf[j * N .. ][0..N]);
+        } else {
+            // It has not enough space to load vector, use maskedLoadVecOr function
+            // to avoid reading past the end.
+            vecn_tuple[j] = simd.maskedLoadVecOr(T, pad_vec, mask, buf[j * N .. ][0..num_irreg]);
+        }
+    }
+    while (j < N_ROW) : (j += 1) {
+        vecn_tuple[j] = pad_vec;
+    }
+
+    sortv.sortNVecs(N_ROW, T, &vecn_tuple);
+
+    i = 0;
+    inline while (i < N_ROW / 2) : (i += 1) {
+        buf[i * N .. ][0..N].* = vecn_tuple[i];
+    }
+
+    j = i;
+    while (j < floor_num_rows) : (j += 1) {
+        buf[j * N .. ][0..N].* = vecn_tuple[j];
+    }
+    while (j < ceil_num_rows) : (j += 1) {
+        if (border == .safed) {
+            // It has enough space to store vector, so use blendedStoreVec function
+            simd.blendedStoreVec(T, mask, buf[j * N .. ][0..N], vecn_tuple[j]);
+        } else {
+            // It has not enough space to store vector, use maskedStoreVec function
+            // to avoid writing past the end.
+            simd.maskedStoreVec(T, mask, buf[j * N .. ][0..num_irreg], vecn_tuple[j]);
+        }
     }
     return;
 }
@@ -361,6 +416,7 @@ fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T, com
     blendedStoreLeftRight(T, vRn_tuple[3], pivot, buf, &writeL, &remaining);
 
     assert(remaining == num_irreg);
+    // std.debug.print("normal last vector writeL={d}, remaining={d}\n", .{ writeL, remaining });
     if (num_irreg > 0) {
         // Use function lastStoreLeftRight for residual unpartitioned data less
         // than the size of a vector.
@@ -429,21 +485,30 @@ fn blendedStoreLeftRight(comptime T: type, vec: @Vector(VecLen(T), T), pivot: T,
 
 // For the last vectors, we can not use blendedLeftRight because it might write
 // past the end. We must use maskedStoreVec to store partial vector.
-fn lastStoreLeftRight(comptime T: type, vec: @Vector(VecLen(T), T), pivot: T, buf: []T, writeL: *usize, remaining: *usize, comptime border: BorderSafe) void {
+fn lastStoreLeftRight(comptime T: type, vec: @Vector(VecLen(T), T), pivot: T,
+                      buf: []T, writeL: *usize, remaining: *usize,
+                      comptime border: BorderSafe) void {
     const N = comptime VecLen(T);
     const mask = vec <= @as(@Vector(N, T), @splat(pivot));
     const int_mask = @as(std.meta.Int(.unsigned, N), @bitCast(mask));
-    const num_left = @popCount(int_mask);
+    var num_left = @popCount(int_mask);
+
+    assert(remaining.* < N);
+    // Sometimes the pivot is max value of type T, and the num_left will be
+    // greater than remaining. In this time, writeL will exceed the range of
+    // the buf, causing an buffer out-of-bounds access error later.
+    // Set num_left to min of num_left and remaining, avoid out-of-bouds access
+    // error.
+    num_left = @min(num_left, remaining.*);
 
     // std.debug.print("lastStoreLeftRight vlast={any}\n", .{vec});
     // std.debug.print("lastStoreLeftRight mask={any} num_left={d}\n", .{ mask, num_left });
 
     const pack_pair = psel.packSelect(vec, mask);
+    const part_mask = simd.maskFirstN(T, remaining.*);
     const left_mask = simd.maskFirstN(T, num_left);
     const pack_comb = @select(T, left_mask, pack_pair[0], pack_pair[1]);
 
-    assert(remaining.* < N);
-    const part_mask = simd.maskFirstN(T, remaining.*);
     if (border == .safed) {
         simd.blendedStoreVec(T, part_mask, buf[writeL.*..][0..N], pack_comb);
     } else {

@@ -1,33 +1,36 @@
 const std = @import("std");
 const simd = @import("simd_core.zig");
+const sortn = @import("sorting_networks.zig");
 
 const VecLen = simd.VecLen;
 const VecType = simd.VecType;
 const VecTupleN = simd.VecTupleN;
 
-pub fn sortNVecs(comptime N: usize, comptime T: type, vtuple: *VecTupleN(N, T)) void {
+const getBisortMaskFlags = sortn.getBisortMaskFlags;
+
+pub fn sortNVecs(comptime N: usize, comptime T: type, vtuple: *[N]VecType(T)) void {
     switch (N) {
-        1 => vtuple.*[0] = bitonicSort1V(T, vtuple.*[0]),
-        4 => sortRow4(T, vtuple),
-        8 => sortRow8(T, vtuple),
+        1 => vtuple[0] = bitonicSort1V(T, vtuple[0]),
+        2, 4, 8, 16 => sortn.sortVecsNxM(N, T, vtuple),
         else => @compileError(std.fmt.comptimePrint("Not support {d} vectors to sort", .{N})),
     }
 }
 
 fn bitonicSort1V(comptime T: type, vec: VecType(T)) VecType(T) {
+    const N = comptime VecLen(T);
     const dummy_vec: VecType(T) = undefined;
     var sorted_vec: VecType(T) = vec;
 
-    const mask_flag_arr = comptime getPermMaskFlagArray(T, .BisortMerge);
+    const mask_flag_arr = comptime getBisortMaskFlags(N, .BisortMerge);
     const perm_masks = mask_flag_arr[0];
     const fftt_flags = mask_flag_arr[1];
 
-    const sort_mask_flag_arr = comptime getPermMaskFlagArray(T, .BisortSort);
+    const sort_mask_flag_arr = comptime getBisortMaskFlags(N, .BisortSort);
     const sort_masks = sort_mask_flag_arr[0];
     const sort_fftt_flags = sort_mask_flag_arr[1];
 
     comptime var merge_step: u16 = 0;
-    const merge_step_max = comptime std.math.log2_int(u16, VecLen(T));
+    const merge_step_max = comptime std.math.log2_int(u16, N);
     inline while (merge_step < merge_step_max) : (merge_step += 1) {
         {
             const perm_mask = perm_masks[merge_step];
@@ -51,56 +54,4 @@ fn bitonicSort1V(comptime T: type, vec: VecType(T)) VecType(T) {
         }
     }
     return sorted_vec;
-}
-
-const BisortStage = enum(u4) {
-    BisortMerge, // Merge two monotonic sequence to a bitonic sequence
-    BisortSort, // Sort the bitonic sequence
-};
-
-fn getPermMaskFlagArray(comptime T: type, stage: BisortStage) struct { []@Vector(VecLen(T), i32), []@Vector(VecLen(T), bool) } {
-    const len = comptime std.math.log2_int(usize, VecLen(T));
-    var mask_arr: [len]@Vector(VecLen(T), i32) = undefined;
-    var fftt_flag_arr: [len]@Vector(VecLen(T), bool) = undefined;
-
-    const ffff_flag: @Vector(VecLen(T) / 2, bool) = @splat(false);
-    const tttt_flag: @Vector(VecLen(T) / 2, bool) = @splat(true);
-    var ft_flags = [_]@Vector(VecLen(T) / 2, bool){ ffff_flag, tttt_flag };
-    var fftt_flag: @Vector(VecLen(T), bool) = undefined;
-
-    const asc_index: @Vector(VecLen(T), i32) = std.simd.iota(i32, VecLen(T));
-    var inc_val = 1;
-    var dec_val = -1;
-    var perm_mask = asc_index;
-
-    var step = 1;
-    var i = 0;
-    while (step < VecLen(T)) : (step *= 2) {
-        fftt_flag = std.simd.interlace(ft_flags);
-        const inc_vec: @Vector(VecLen(T), i32) = @splat(inc_val);
-        const dec_vec: @Vector(VecLen(T), i32) = @splat(dec_val);
-        perm_mask = switch (stage) {
-            .BisortMerge => perm_mask + @select(i32, fftt_flag, dec_vec, inc_vec),
-            .BisortSort => asc_index + @select(i32, fftt_flag, dec_vec, inc_vec),
-        };
-
-        ft_flags[0] = std.simd.extract(fftt_flag, 0, VecLen(T) / 2);
-        ft_flags[1] = std.simd.extract(fftt_flag, VecLen(T) / 2, VecLen(T) / 2);
-        inc_val = inc_val * 2;
-        dec_val = dec_val * 2;
-
-        mask_arr[i] = perm_mask;
-        fftt_flag_arr[i] = fftt_flag;
-        i += 1;
-    }
-
-    return .{ &mask_arr, &fftt_flag_arr };
-}
-
-fn sortRow4(comptime T: type, vtuple: VecTupleN(4, T)) VecTupleN(4, T) {
-    return vtuple;
-}
-
-fn sortRow8(comptime T: type, vtuple: VecTupleN(8, T)) VecTupleN(8, T) {
-    return vtuple;
 }
