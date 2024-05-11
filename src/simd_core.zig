@@ -120,8 +120,8 @@ pub fn prefix_xor(bitmask: anytype) @TypeOf(bitmask) {
 
     // do a carryless multiply by all 1's,
     // adapted from zig/lib/std/crypto/ghash_polyval.zig
-    const x = @as(u128, @bitCast([2]u64{ @as(u64, bitmask), 0 }));
-    const y = @as(u128, @bitCast(@as(@Vector(16, u8), @splat(@as(u8, 0xff)))));
+    const x: u128 = @bitCast([2]u64{ @as(u64, bitmask), 0 });
+    const y: u128 = @bitCast(@as(@Vector(16, u8), @splat(0xff)));
 
     return @as(@TypeOf(bitmask), @truncate(switch (builtin.cpu.arch) {
         .x86_64 => asm (
@@ -142,6 +142,9 @@ pub fn prefix_xor(bitmask: anytype) @TypeOf(bitmask) {
     }[0]));
 }
 
+// ----------------------------------------------------------------------------
+// This code is copied from Accelerated-Zig-Parser, licensed
+// under the MIT License which is included at the bottom of this file
 // TODO: clean this up a bit
 fn pext(src: anytype, comptime mask: @TypeOf(src)) @TypeOf(src) {
     if (mask == 0) return 0;
@@ -215,3 +218,25 @@ fn pext(src: anytype, comptime mask: @TypeOf(src)) @TypeOf(src) {
         return ans;
     }
 }
+
+// MIT License
+//
+// Copyright (c) 2023 Niles Salter
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
