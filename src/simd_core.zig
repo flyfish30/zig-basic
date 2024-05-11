@@ -72,13 +72,13 @@ fn CopyPtrAttrs(
     });
 }
 
-fn AsArrayReturnType(comptime T: type, comptime P: type) type {
+fn AsSliceReturnType(comptime T: type, comptime P: type) type {
     const size = @sizeOf(std.meta.Child(P));
     return CopyPtrAttrs(P, .One, [size / @sizeOf(T)]T);
 }
 
 /// Given a pointer to a single item, returns a slice of the underlying type, preserving pointer attributes.
-pub fn asSlice(comptime T: type, ptr: anytype) AsArrayReturnType(T, @TypeOf(ptr)) {
+pub fn asSlice(comptime T: type, ptr: anytype) AsSliceReturnType(T, @TypeOf(ptr)) {
     return @ptrCast(@alignCast(ptr));
 }
 

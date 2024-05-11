@@ -65,7 +65,7 @@ pub fn tableLookupBytes(tbl: @Vector(VecLen(u8), u8), idx: @Vector(VecLen(i8), i
     return wasm_shuffle_u8(tbl, idx);
 }
 
-pub fn tableLookup128Bytes(tbl: @Vector(16, u8), idx: @Vector(16, i8)) @TypeOf(tbl) {
+pub fn tableLookup16Bytes(tbl: @Vector(16, u8), idx: @Vector(16, i8)) @TypeOf(tbl) {
     // wasm32 has 128 bits vector
     return wasm_shuffle_u8(tbl, idx);
 }

@@ -4,6 +4,7 @@ const simd = @import("simd_core.zig");
 const builtin = @import("builtin");
 const target = builtin.target;
 const arch = target.cpu.arch;
+const native_endian = builtin.cpu.arch.endian();
 
 const assert = std.debug.assert;
 
@@ -13,8 +14,8 @@ const VecType = simd.VecType;
 const vectorLength = simd.vectorLength;
 const VecChild = simd.VecChild;
 
-fn Pair(comptime VType: type) type {
-    return struct { VType, VType };
+fn Pair(comptime T: type) type {
+    return struct { T, T };
 }
 
 pub fn packSelectLeft(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bool)) @TypeOf(vec) {
@@ -55,7 +56,8 @@ fn packSelectGeneric(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), boo
             vec_lane[count0..][0 .. vecLen / 2].* = vec1_pair[0];
             vec_lane[vecLen * 3 / 2 .. vecLen * 2].* = vec1_pair[1];
             vec_lane[vecLen + count1 ..][0 .. vecLen / 2].* = vec0_pair[1];
-            return .{ @bitCast(std.simd.extract(vec_lane, 0, vecLen)), @bitCast(std.simd.extract(vec_lane, vecLen, vecLen)) };
+            return .{ @bitCast(std.simd.extract(vec_lane, 0, vecLen)),
+                      @bitCast(std.simd.extract(vec_lane, vecLen, vecLen)) };
         },
         else => @compileError(std.fmt.comptimePrint("packSelectLeftGeneric can not support {d} bits vector", .{VEC_BITS_LEN})),
     }
@@ -74,7 +76,7 @@ fn packSelectVec128(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bool
             const count1 = @popCount(mask1_u);
 
             const idx: @Vector(16, i8) = @bitCast(idxFromBits128(u8, mask_u));
-            const pack_2vec = simd.tableLookup128Bytes(vec, idx);
+            const pack_2vec = simd.tableLookup16Bytes(vec, idx);
             const vec0: @Vector(8, u8) = @bitCast(std.simd.extract(pack_2vec, 0, 8));
             const vec1: @Vector(8, u8) = @bitCast(std.simd.extract(pack_2vec, 8, 8));
 
@@ -86,12 +88,13 @@ fn packSelectVec128(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bool
             vec_lane[count0..][0 .. vecLen / 2].* = vec1;
             vec_lane[vecLen * 3 / 2 .. vecLen * 2].* = vec1;
             vec_lane[vecLen + count1 ..][0 .. vecLen / 2].* = vec0;
-            return .{ @bitCast(std.simd.extract(vec_lane, 0, vecLen)), @bitCast(std.simd.extract(vec_lane, vecLen, vecLen)) };
+            return .{ @bitCast(std.simd.extract(vec_lane, 0, vecLen)),
+                      @bitCast(std.simd.extract(vec_lane, vecLen, vecLen)) };
         },
         16, 32, 64 => {
             const mask_u: u64 = @as(std.meta.Int(.unsigned, vecLen), @bitCast(mask));
             const idx: @Vector(16, i8) = @bitCast(idxFromBits128(Child, mask_u));
-            const packed_vec = simd.tableLookup128Bytes(@as(@Vector(16, u8), @bitCast(vec)), idx);
+            const packed_vec = simd.tableLookup16Bytes(@as(@Vector(16, u8), @bitCast(vec)), idx);
             // packed_vec layout is bellow
             // count = @popCount(mask_u)
             // packSelect left  <-- | -->             packSelect right
@@ -104,10 +107,43 @@ fn packSelectVec128(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bool
     return vec;
 }
 
-const table8x16: [256 * 8]u8 align(16) = table_indices: {
-    var indices: @Vector(256 * 8, u8) = table16x8[0 .. 256 * 8].*;
-    indices /= @splat(2);
-    break :table_indices @bitCast(indices);
+fn lenLookupTable(comptime num: u16) usize {
+    const IntType = std.meta.Int(.unsigned, num);
+    const max_int: u16 = std.math.maxInt(IntType);
+    return (max_int + 1) * num;
+}
+
+// The num parameter is number of lanes in SIMD vector
+fn getLaneIndicesTable(comptime num: u16) [lenLookupTable(num)]u8 {
+    comptime var indices: [lenLookupTable(num)]u8 = undefined;
+    const asc_idx: [num]u8 = @bitCast(std.simd.iota(u8, num));
+    comptime var i = 0;
+    inline while (i < (1 << num)) : (i += 1) {
+        comptime var bit_idx = 0;
+        comptime var bit_idx_rev = num;
+        comptime var j_rev = bit_idx_rev;
+        comptime var j = 0;
+        // generate lane indices for bit compress table
+        inline while (bit_idx < num) : (bit_idx += 1) {
+            if (i & (1 << bit_idx) != 0) {
+                indices[i * num + j] = asc_idx[bit_idx];
+                j += 1;
+            }
+            bit_idx_rev -= 1;
+            if (i & (1 << bit_idx_rev) == 0) {
+                j_rev -= 1;
+                indices[i * num + j_rev] = asc_idx[bit_idx_rev];
+            }
+        }
+    }
+
+    return indices;
+}
+
+// lookup table of byte indices for 256 combinations of 8 mask bits
+const table8x8: [256 * 8]u8 align(16) = table8x8_indices: {
+    @setEvalBranchQuota(2500);
+    break :table8x8_indices getLaneIndicesTable(8);
 };
 
 // Some cpu simd extention(Neon, SSE4, AVX, .etc) not provide an equivalent
@@ -119,166 +155,26 @@ const table8x16: [256 * 8]u8 align(16) = table_indices: {
 // broadcasts them into each 32-bit lane and shifts. Here, 16-bit lanes are too
 // narrow to hold all bits, and unpacking nibbles is likely more costly than
 // the higher cache footprint from storing bytes.
-const table16x8: [256 * 8]u8 align(16) = .{
-    // PrintCompress16x8Tables
-    0, 2, 4, 6, 8, 10, 12, 14, 0, 2, 4, 6, 8, 10, 12, 14, //
-    2, 0, 4, 6, 8, 10, 12, 14, 0, 2, 4, 6, 8, 10, 12, 14, //
-    4, 0, 2, 6, 8, 10, 12, 14, 0, 4, 2, 6, 8, 10, 12, 14, //
-    2, 4, 0, 6, 8, 10, 12, 14, 0, 2, 4, 6, 8, 10, 12, 14, //
-    6, 0, 2, 4, 8, 10, 12, 14, 0, 6, 2, 4, 8, 10, 12, 14, //
-    2, 6, 0, 4, 8, 10, 12, 14, 0, 2, 6, 4, 8, 10, 12, 14, //
-    4, 6, 0, 2, 8, 10, 12, 14, 0, 4, 6, 2, 8, 10, 12, 14, //
-    2, 4, 6, 0, 8, 10, 12, 14, 0, 2, 4, 6, 8, 10, 12, 14, //
-    8, 0, 2, 4, 6, 10, 12, 14, 0, 8, 2, 4, 6, 10, 12, 14, //
-    2, 8, 0, 4, 6, 10, 12, 14, 0, 2, 8, 4, 6, 10, 12, 14, //
-    4, 8, 0, 2, 6, 10, 12, 14, 0, 4, 8, 2, 6, 10, 12, 14, //
-    2, 4, 8, 0, 6, 10, 12, 14, 0, 2, 4, 8, 6, 10, 12, 14, //
-    6, 8, 0, 2, 4, 10, 12, 14, 0, 6, 8, 2, 4, 10, 12, 14, //
-    2, 6, 8, 0, 4, 10, 12, 14, 0, 2, 6, 8, 4, 10, 12, 14, //
-    4, 6, 8, 0, 2, 10, 12, 14, 0, 4, 6, 8, 2, 10, 12, 14, //
-    2, 4, 6, 8, 0, 10, 12, 14, 0, 2, 4, 6, 8, 10, 12, 14, //
-    10, 0, 2, 4, 6, 8, 12, 14, 0, 10, 2, 4, 6, 8, 12, 14, //
-    2, 10, 0, 4, 6, 8, 12, 14, 0, 2, 10, 4, 6, 8, 12, 14, //
-    4, 10, 0, 2, 6, 8, 12, 14, 0, 4, 10, 2, 6, 8, 12, 14, //
-    2, 4, 10, 0, 6, 8, 12, 14, 0, 2, 4, 10, 6, 8, 12, 14, //
-    6, 10, 0, 2, 4, 8, 12, 14, 0, 6, 10, 2, 4, 8, 12, 14, //
-    2, 6, 10, 0, 4, 8, 12, 14, 0, 2, 6, 10, 4, 8, 12, 14, //
-    4, 6, 10, 0, 2, 8, 12, 14, 0, 4, 6, 10, 2, 8, 12, 14, //
-    2, 4, 6, 10, 0, 8, 12, 14, 0, 2, 4, 6, 10, 8, 12, 14, //
-    8, 10, 0, 2, 4, 6, 12, 14, 0, 8, 10, 2, 4, 6, 12, 14, //
-    2, 8, 10, 0, 4, 6, 12, 14, 0, 2, 8, 10, 4, 6, 12, 14, //
-    4, 8, 10, 0, 2, 6, 12, 14, 0, 4, 8, 10, 2, 6, 12, 14, //
-    2, 4, 8, 10, 0, 6, 12, 14, 0, 2, 4, 8, 10, 6, 12, 14, //
-    6, 8, 10, 0, 2, 4, 12, 14, 0, 6, 8, 10, 2, 4, 12, 14, //
-    2, 6, 8, 10, 0, 4, 12, 14, 0, 2, 6, 8, 10, 4, 12, 14, //
-    4, 6, 8, 10, 0, 2, 12, 14, 0, 4, 6, 8, 10, 2, 12, 14, //
-    2, 4, 6, 8, 10, 0, 12, 14, 0, 2, 4, 6, 8, 10, 12, 14, //
-    12, 0, 2, 4, 6, 8, 10, 14, 0, 12, 2, 4, 6, 8, 10, 14, //
-    2, 12, 0, 4, 6, 8, 10, 14, 0, 2, 12, 4, 6, 8, 10, 14, //
-    4, 12, 0, 2, 6, 8, 10, 14, 0, 4, 12, 2, 6, 8, 10, 14, //
-    2, 4, 12, 0, 6, 8, 10, 14, 0, 2, 4, 12, 6, 8, 10, 14, //
-    6, 12, 0, 2, 4, 8, 10, 14, 0, 6, 12, 2, 4, 8, 10, 14, //
-    2, 6, 12, 0, 4, 8, 10, 14, 0, 2, 6, 12, 4, 8, 10, 14, //
-    4, 6, 12, 0, 2, 8, 10, 14, 0, 4, 6, 12, 2, 8, 10, 14, //
-    2, 4, 6, 12, 0, 8, 10, 14, 0, 2, 4, 6, 12, 8, 10, 14, //
-    8, 12, 0, 2, 4, 6, 10, 14, 0, 8, 12, 2, 4, 6, 10, 14, //
-    2, 8, 12, 0, 4, 6, 10, 14, 0, 2, 8, 12, 4, 6, 10, 14, //
-    4, 8, 12, 0, 2, 6, 10, 14, 0, 4, 8, 12, 2, 6, 10, 14, //
-    2, 4, 8, 12, 0, 6, 10, 14, 0, 2, 4, 8, 12, 6, 10, 14, //
-    6, 8, 12, 0, 2, 4, 10, 14, 0, 6, 8, 12, 2, 4, 10, 14, //
-    2, 6, 8, 12, 0, 4, 10, 14, 0, 2, 6, 8, 12, 4, 10, 14, //
-    4, 6, 8, 12, 0, 2, 10, 14, 0, 4, 6, 8, 12, 2, 10, 14, //
-    2, 4, 6, 8, 12, 0, 10, 14, 0, 2, 4, 6, 8, 12, 10, 14, //
-    10, 12, 0, 2, 4, 6, 8, 14, 0, 10, 12, 2, 4, 6, 8, 14, //
-    2, 10, 12, 0, 4, 6, 8, 14, 0, 2, 10, 12, 4, 6, 8, 14, //
-    4, 10, 12, 0, 2, 6, 8, 14, 0, 4, 10, 12, 2, 6, 8, 14, //
-    2, 4, 10, 12, 0, 6, 8, 14, 0, 2, 4, 10, 12, 6, 8, 14, //
-    6, 10, 12, 0, 2, 4, 8, 14, 0, 6, 10, 12, 2, 4, 8, 14, //
-    2, 6, 10, 12, 0, 4, 8, 14, 0, 2, 6, 10, 12, 4, 8, 14, //
-    4, 6, 10, 12, 0, 2, 8, 14, 0, 4, 6, 10, 12, 2, 8, 14, //
-    2, 4, 6, 10, 12, 0, 8, 14, 0, 2, 4, 6, 10, 12, 8, 14, //
-    8, 10, 12, 0, 2, 4, 6, 14, 0, 8, 10, 12, 2, 4, 6, 14, //
-    2, 8, 10, 12, 0, 4, 6, 14, 0, 2, 8, 10, 12, 4, 6, 14, //
-    4, 8, 10, 12, 0, 2, 6, 14, 0, 4, 8, 10, 12, 2, 6, 14, //
-    2, 4, 8, 10, 12, 0, 6, 14, 0, 2, 4, 8, 10, 12, 6, 14, //
-    6, 8, 10, 12, 0, 2, 4, 14, 0, 6, 8, 10, 12, 2, 4, 14, //
-    2, 6, 8, 10, 12, 0, 4, 14, 0, 2, 6, 8, 10, 12, 4, 14, //
-    4, 6, 8, 10, 12, 0, 2, 14, 0, 4, 6, 8, 10, 12, 2, 14, //
-    2, 4, 6, 8, 10, 12, 0, 14, 0, 2, 4, 6, 8, 10, 12, 14, //
-    14, 0, 2, 4, 6, 8, 10, 12, 0, 14, 2, 4, 6, 8, 10, 12, //
-    2, 14, 0, 4, 6, 8, 10, 12, 0, 2, 14, 4, 6, 8, 10, 12, //
-    4, 14, 0, 2, 6, 8, 10, 12, 0, 4, 14, 2, 6, 8, 10, 12, //
-    2, 4, 14, 0, 6, 8, 10, 12, 0, 2, 4, 14, 6, 8, 10, 12, //
-    6, 14, 0, 2, 4, 8, 10, 12, 0, 6, 14, 2, 4, 8, 10, 12, //
-    2, 6, 14, 0, 4, 8, 10, 12, 0, 2, 6, 14, 4, 8, 10, 12, //
-    4, 6, 14, 0, 2, 8, 10, 12, 0, 4, 6, 14, 2, 8, 10, 12, //
-    2, 4, 6, 14, 0, 8, 10, 12, 0, 2, 4, 6, 14, 8, 10, 12, //
-    8, 14, 0, 2, 4, 6, 10, 12, 0, 8, 14, 2, 4, 6, 10, 12, //
-    2, 8, 14, 0, 4, 6, 10, 12, 0, 2, 8, 14, 4, 6, 10, 12, //
-    4, 8, 14, 0, 2, 6, 10, 12, 0, 4, 8, 14, 2, 6, 10, 12, //
-    2, 4, 8, 14, 0, 6, 10, 12, 0, 2, 4, 8, 14, 6, 10, 12, //
-    6, 8, 14, 0, 2, 4, 10, 12, 0, 6, 8, 14, 2, 4, 10, 12, //
-    2, 6, 8, 14, 0, 4, 10, 12, 0, 2, 6, 8, 14, 4, 10, 12, //
-    4, 6, 8, 14, 0, 2, 10, 12, 0, 4, 6, 8, 14, 2, 10, 12, //
-    2, 4, 6, 8, 14, 0, 10, 12, 0, 2, 4, 6, 8, 14, 10, 12, //
-    10, 14, 0, 2, 4, 6, 8, 12, 0, 10, 14, 2, 4, 6, 8, 12, //
-    2, 10, 14, 0, 4, 6, 8, 12, 0, 2, 10, 14, 4, 6, 8, 12, //
-    4, 10, 14, 0, 2, 6, 8, 12, 0, 4, 10, 14, 2, 6, 8, 12, //
-    2, 4, 10, 14, 0, 6, 8, 12, 0, 2, 4, 10, 14, 6, 8, 12, //
-    6, 10, 14, 0, 2, 4, 8, 12, 0, 6, 10, 14, 2, 4, 8, 12, //
-    2, 6, 10, 14, 0, 4, 8, 12, 0, 2, 6, 10, 14, 4, 8, 12, //
-    4, 6, 10, 14, 0, 2, 8, 12, 0, 4, 6, 10, 14, 2, 8, 12, //
-    2, 4, 6, 10, 14, 0, 8, 12, 0, 2, 4, 6, 10, 14, 8, 12, //
-    8, 10, 14, 0, 2, 4, 6, 12, 0, 8, 10, 14, 2, 4, 6, 12, //
-    2, 8, 10, 14, 0, 4, 6, 12, 0, 2, 8, 10, 14, 4, 6, 12, //
-    4, 8, 10, 14, 0, 2, 6, 12, 0, 4, 8, 10, 14, 2, 6, 12, //
-    2, 4, 8, 10, 14, 0, 6, 12, 0, 2, 4, 8, 10, 14, 6, 12, //
-    6, 8, 10, 14, 0, 2, 4, 12, 0, 6, 8, 10, 14, 2, 4, 12, //
-    2, 6, 8, 10, 14, 0, 4, 12, 0, 2, 6, 8, 10, 14, 4, 12, //
-    4, 6, 8, 10, 14, 0, 2, 12, 0, 4, 6, 8, 10, 14, 2, 12, //
-    2, 4, 6, 8, 10, 14, 0, 12, 0, 2, 4, 6, 8, 10, 14, 12, //
-    12, 14, 0, 2, 4, 6, 8, 10, 0, 12, 14, 2, 4, 6, 8, 10, //
-    2, 12, 14, 0, 4, 6, 8, 10, 0, 2, 12, 14, 4, 6, 8, 10, //
-    4, 12, 14, 0, 2, 6, 8, 10, 0, 4, 12, 14, 2, 6, 8, 10, //
-    2, 4, 12, 14, 0, 6, 8, 10, 0, 2, 4, 12, 14, 6, 8, 10, //
-    6, 12, 14, 0, 2, 4, 8, 10, 0, 6, 12, 14, 2, 4, 8, 10, //
-    2, 6, 12, 14, 0, 4, 8, 10, 0, 2, 6, 12, 14, 4, 8, 10, //
-    4, 6, 12, 14, 0, 2, 8, 10, 0, 4, 6, 12, 14, 2, 8, 10, //
-    2, 4, 6, 12, 14, 0, 8, 10, 0, 2, 4, 6, 12, 14, 8, 10, //
-    8, 12, 14, 0, 2, 4, 6, 10, 0, 8, 12, 14, 2, 4, 6, 10, //
-    2, 8, 12, 14, 0, 4, 6, 10, 0, 2, 8, 12, 14, 4, 6, 10, //
-    4, 8, 12, 14, 0, 2, 6, 10, 0, 4, 8, 12, 14, 2, 6, 10, //
-    2, 4, 8, 12, 14, 0, 6, 10, 0, 2, 4, 8, 12, 14, 6, 10, //
-    6, 8, 12, 14, 0, 2, 4, 10, 0, 6, 8, 12, 14, 2, 4, 10, //
-    2, 6, 8, 12, 14, 0, 4, 10, 0, 2, 6, 8, 12, 14, 4, 10, //
-    4, 6, 8, 12, 14, 0, 2, 10, 0, 4, 6, 8, 12, 14, 2, 10, //
-    2, 4, 6, 8, 12, 14, 0, 10, 0, 2, 4, 6, 8, 12, 14, 10, //
-    10, 12, 14, 0, 2, 4, 6, 8, 0, 10, 12, 14, 2, 4, 6, 8, //
-    2, 10, 12, 14, 0, 4, 6, 8, 0, 2, 10, 12, 14, 4, 6, 8, //
-    4, 10, 12, 14, 0, 2, 6, 8, 0, 4, 10, 12, 14, 2, 6, 8, //
-    2, 4, 10, 12, 14, 0, 6, 8, 0, 2, 4, 10, 12, 14, 6, 8, //
-    6, 10, 12, 14, 0, 2, 4, 8, 0, 6, 10, 12, 14, 2, 4, 8, //
-    2, 6, 10, 12, 14, 0, 4, 8, 0, 2, 6, 10, 12, 14, 4, 8, //
-    4, 6, 10, 12, 14, 0, 2, 8, 0, 4, 6, 10, 12, 14, 2, 8, //
-    2, 4, 6, 10, 12, 14, 0, 8, 0, 2, 4, 6, 10, 12, 14, 8, //
-    8, 10, 12, 14, 0, 2, 4, 6, 0, 8, 10, 12, 14, 2, 4, 6, //
-    2, 8, 10, 12, 14, 0, 4, 6, 0, 2, 8, 10, 12, 14, 4, 6, //
-    4, 8, 10, 12, 14, 0, 2, 6, 0, 4, 8, 10, 12, 14, 2, 6, //
-    2, 4, 8, 10, 12, 14, 0, 6, 0, 2, 4, 8, 10, 12, 14, 6, //
-    6, 8, 10, 12, 14, 0, 2, 4, 0, 6, 8, 10, 12, 14, 2, 4, //
-    2, 6, 8, 10, 12, 14, 0, 4, 0, 2, 6, 8, 10, 12, 14, 4, //
-    4, 6, 8, 10, 12, 14, 0,  2, 0, 4, 6, 8, 10, 12, 14, 2, //
-    2, 4, 6, 8,  10, 12, 14, 0, 0, 2, 4, 6, 8,  10, 12, 14,
+const table16x8: [256 * 8]u8 align(16) = table16x8_indices: {
+    var indices: @Vector(256 * 8, u8) = table8x8[0.. 256 * 8].*;
+    indices *= @splat(2);
+    break :table16x8_indices indices;
 };
 
 // There are only 4 lanes, so we can afford to load the index vector directly.
-const indices32x4: [16 * 16]u8 align(16) = .{
-    // PrintCompress32x4Tables
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, //
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, //
-    4, 5, 6, 7, 0, 1, 2, 3, 8, 9, 10, 11, 12, 13, 14, 15, //
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, //
-    8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 6, 7, 12, 13, 14, 15, //
-    0, 1, 2, 3, 8, 9, 10, 11, 4, 5, 6, 7, 12, 13, 14, 15, //
-    4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3, 12, 13, 14, 15, //
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, //
-    12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, //
-    0, 1, 2, 3, 12, 13, 14, 15, 4, 5, 6, 7, 8, 9, 10, 11, //
-    4, 5, 6, 7, 12, 13, 14, 15, 0, 1, 2, 3, 8, 9, 10, 11, //
-    0, 1, 2, 3, 4, 5, 6, 7, 12, 13, 14, 15, 8, 9, 10, 11, //
-    8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, //
-    0, 1, 2, 3, 8, 9, 10, 11, 12, 13, 14, 15, 4, 5, 6, 7, //
-    4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0,  1,  2,  3, //
-    0, 1, 2, 3, 4, 5, 6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+const indices32x4: [16 * 16]u8 align(16) = table32x4_indices: {
+    var table_indices = @as(@Vector(16 * 4, u32), getLaneIndicesTable(4));
+    table_indices *= @splat(@as(u32, 0x04040404));
+    table_indices += @splat(@as(u32, 0x03020100));
+    break :table32x4_indices @bitCast(table_indices);
 };
 
 // There are only 2 lanes, so we can afford to load the index vector directly.
-const indices64x2: [4 * 16]u8 align(16) = .{
-    // PrintCompress64x2Tables
-    0, 1, 2,  3,  4,  5,  6,  7,  8, 9, 10, 11, 12, 13, 14, 15,
-    0, 1, 2,  3,  4,  5,  6,  7,  8, 9, 10, 11, 12, 13, 14, 15,
-    8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2,  3,  4,  5,  6,  7,
-    0, 1, 2,  3,  4,  5,  6,  7,  8, 9, 10, 11, 12, 13, 14, 15,
+const indices64x2: [4 * 16]u8 align(16) = table32x4_indices: {
+    var table_indices = @as(@Vector(4 * 2, u64), getLaneIndicesTable(2));
+    table_indices *= @splat(@as(u64, 0x08080808_08080808));
+    table_indices += @splat(@as(u64, 0x07060504_03020100));
+    break :table32x4_indices @bitCast(table_indices);
 };
 
 fn idxFromBits128(comptime T: type, mask_bits: u64) @Vector(16, u8) {
@@ -286,17 +182,19 @@ fn idxFromBits128(comptime T: type, mask_bits: u64) @Vector(16, u8) {
         1 => {
             const mask0_bits = @as(usize, @intCast(mask_bits & 0xff));
             const mask1_bits = @as(usize, @intCast((mask_bits >> 8) & 0xff));
-            const idx0: @Vector(8, u8) = table8x16[mask0_bits * 8 ..][0..8].*;
-            var idx1: @Vector(8, u8) = table8x16[mask1_bits * 8 ..][0..8].*;
+            const idx0: @Vector(8, u8) = table8x8[mask0_bits * 8 ..][0..8].*;
+            var idx1: @Vector(8, u8) = table8x8[mask1_bits * 8 ..][0..8].*;
             idx1 += @splat(8);
             return std.simd.join(idx0, idx1);
         },
         2 => {
-            // TODO: It is only for little-endian, it should to implement
-            // it for big-endian
+            // TODO: It is only tested in little-endian, it should to verify it
+            // in big-endian
             const byte_idx: @Vector(8, u8) = table16x8[@intCast(mask_bits * 8) ..][0..8].*;
-            const pairs: @Vector(8, u16) = @bitCast(std.simd.interlace([_]@Vector(8, u8){ byte_idx, byte_idx }));
-            return @bitCast(pairs + @as(@Vector(8, u16), @splat(0x100)));
+            switch (native_endian) {
+                .little => return @bitCast(std.simd.interlace(.{ byte_idx, byte_idx + @as(@Vector(8, u8), @splat(1)) })),
+                .big => return @bitCast(std.simd.interlace(.{ byte_idx + @as(@Vector(8, u8), @splat(1)), byte_idx })),
+            }
         },
         4 => {
             return indices32x4[@intCast(mask_bits * 16) ..][0..16].*;

@@ -72,7 +72,7 @@ fn vqsortSample() !void {
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
-    var array_int = try allocator.alloc(IntType, 23749);
+    var array_int = try allocator.alloc(IntType, 3749);
     defer allocator.free(array_int);
     for (array_int) |*a| {
         a.* = prnd.random().int(IntType);

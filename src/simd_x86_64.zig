@@ -176,7 +176,7 @@ inline fn mm128_shuffle_u8(vec: @Vector(16, u8), idx: @Vector(16, i8)) @TypeOf(v
     );
 }
 
-pub fn tableLookup128Bytes(tbl: @Vector(16, u8), idx: @Vector(16, i8)) @TypeOf(tbl) {
+pub fn tableLookup16Bytes(tbl: @Vector(16, u8), idx: @Vector(16, i8)) @TypeOf(tbl) {
     return mm128_shuffle_u8(tbl, idx);
 }
 

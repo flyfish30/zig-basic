@@ -102,11 +102,8 @@ fn sortSmallBuf(comptime T: type, buf: []T, num: usize, comptime border: BorderS
     }
 
     switch (log2_diff) {
-        0 => sortRowsN(1, T, buf, num, border),
-        1 => sortRowsN(2, T, buf, num, border),
-        2 => sortRowsN(4, T, buf, num, border),
-        3 => sortRowsN(8, T, buf, num, border),
-        4 => sortRowsN(16, T, buf, num, border),
+        // N_ROW = pow(2, n)
+        inline 0...4 => |n| sortRowsN(1 << n, T, buf, num, border),
         else => {
             std.debug.print("Too many rows({d}) to sort", .{ log2_diff });
             unreachable;
