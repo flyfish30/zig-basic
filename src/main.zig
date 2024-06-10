@@ -42,7 +42,7 @@ fn vecSortSample() void {
     const N = comptime VecLen(IntType);
     const N_VECS = 16;
     var prnd = std.rand.DefaultPrng.init(83751737);
-    var array_int: [N*N_VECS]IntType = undefined;
+    var array_int: [N * N_VECS]IntType = undefined;
     for (&array_int) |*a| {
         a.* = prnd.random().int(IntType);
     }
@@ -50,7 +50,7 @@ fn vecSortSample() void {
     comptime var i = 0;
     var vecn_tuple: [N_VECS]VecType(IntType) = undefined;
     inline while (i < N_VECS) : (i += 1) {
-        vecn_tuple[i] = array_int[i * N ..][0 .. N].*;
+        vecn_tuple[i] = array_int[i * N ..][0..N].*;
         // std.debug.print("original vec_int[{d}] is: {any}\n", .{i, vecn_tuple[i]});
     }
 
@@ -58,7 +58,7 @@ fn vecSortSample() void {
 
     i = 0;
     inline while (i < N_VECS) : (i += 1) {
-        array_int[i * N ..][0 .. N].* = vecn_tuple[i];
+        array_int[i * N ..][0..N].* = vecn_tuple[i];
         // std.debug.print("sorted vec_int[{d}] is: {any}\n", .{i, vecn_tuple[i]});
     }
     const is_sorted = vqsort.isSorted(IntType, simd.asSlice(IntType, &array_int));

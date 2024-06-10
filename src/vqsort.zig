@@ -105,7 +105,7 @@ fn sortSmallBuf(comptime T: type, buf: []T, num: usize, comptime border: BorderS
         // N_ROW = pow(2, n)
         inline 0...4 => |n| sortRowsN(1 << n, T, buf, num, border),
         else => {
-            std.debug.print("Too many rows({d}) to sort", .{ log2_diff });
+            std.debug.print("Too many rows({d}) to sort", .{log2_diff});
             unreachable;
         },
     }
@@ -126,23 +126,23 @@ fn sortRowsN(comptime N_ROW: usize, comptime T: type, buf: []T, num: usize, comp
 
     comptime var i: u16 = 0;
     inline while (i < N_ROW / 2) : (i += 1) {
-        vecn_tuple[i] = buf[i * N .. ][0..N].*;
+        vecn_tuple[i] = buf[i * N ..][0..N].*;
     }
 
     var j: u16 = i;
     const floor_num_rows = num / N;
     const ceil_num_rows = (num + N - 1) / N;
     while (j < floor_num_rows) : (j += 1) {
-        vecn_tuple[j] = buf[j * N .. ][0..N].*;
+        vecn_tuple[j] = buf[j * N ..][0..N].*;
     }
     while (j < ceil_num_rows) : (j += 1) {
         if (border == .safed) {
             // It has enough space to load vector, so use blendedLoadVecOr function
-            vecn_tuple[j] = simd.blendedLoadVecOr(T, pad_vec, mask, buf[j * N .. ][0..N]);
+            vecn_tuple[j] = simd.blendedLoadVecOr(T, pad_vec, mask, buf[j * N ..][0..N]);
         } else {
             // It has not enough space to load vector, use maskedLoadVecOr function
             // to avoid reading past the end.
-            vecn_tuple[j] = simd.maskedLoadVecOr(T, pad_vec, mask, buf[j * N .. ][0..num_irreg]);
+            vecn_tuple[j] = simd.maskedLoadVecOr(T, pad_vec, mask, buf[j * N ..][0..num_irreg]);
         }
     }
     while (j < N_ROW) : (j += 1) {
@@ -153,21 +153,21 @@ fn sortRowsN(comptime N_ROW: usize, comptime T: type, buf: []T, num: usize, comp
 
     i = 0;
     inline while (i < N_ROW / 2) : (i += 1) {
-        buf[i * N .. ][0..N].* = vecn_tuple[i];
+        buf[i * N ..][0..N].* = vecn_tuple[i];
     }
 
     j = i;
     while (j < floor_num_rows) : (j += 1) {
-        buf[j * N .. ][0..N].* = vecn_tuple[j];
+        buf[j * N ..][0..N].* = vecn_tuple[j];
     }
     while (j < ceil_num_rows) : (j += 1) {
         if (border == .safed) {
             // It has enough space to store vector, so use blendedStoreVec function
-            simd.blendedStoreVec(T, mask, buf[j * N .. ][0..N], vecn_tuple[j]);
+            simd.blendedStoreVec(T, mask, buf[j * N ..][0..N], vecn_tuple[j]);
         } else {
             // It has not enough space to store vector, use maskedStoreVec function
             // to avoid writing past the end.
-            simd.maskedStoreVec(T, mask, buf[j * N .. ][0..num_irreg], vecn_tuple[j]);
+            simd.maskedStoreVec(T, mask, buf[j * N ..][0..num_irreg], vecn_tuple[j]);
         }
     }
     return;
@@ -482,9 +482,7 @@ fn blendedStoreLeftRight(comptime T: type, vec: @Vector(VecLen(T), T), pivot: T,
 
 // For the last vectors, we can not use blendedLeftRight because it might write
 // past the end. We must use maskedStoreVec to store partial vector.
-fn lastStoreLeftRight(comptime T: type, vec: @Vector(VecLen(T), T), pivot: T,
-                      buf: []T, writeL: *usize, remaining: *usize,
-                      comptime border: BorderSafe) void {
+fn lastStoreLeftRight(comptime T: type, vec: @Vector(VecLen(T), T), pivot: T, buf: []T, writeL: *usize, remaining: *usize, comptime border: BorderSafe) void {
     const N = comptime VecLen(T);
     const mask = vec <= @as(@Vector(N, T), @splat(pivot));
     const int_mask = @as(std.meta.Int(.unsigned, N), @bitCast(mask));

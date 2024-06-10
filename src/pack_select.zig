@@ -163,18 +163,18 @@ const table16x8: [256 * 8]u8 align(16) = table16x8_indices: {
 
 // There are only 4 lanes, so we can afford to load the index vector directly.
 const indices32x4: [16 * 16]u8 align(16) = table32x4_indices: {
-    var table_indices = @as(@Vector(16 * 4, u32), getLaneIndicesTable(4));
-    table_indices *= @splat(@as(u32, 0x04040404));
-    table_indices += @splat(@as(u32, 0x03020100));
-    break :table32x4_indices @bitCast(table_indices);
+    var indices = @as(@Vector(16 * 4, u32), getLaneIndicesTable(4));
+    indices *= @splat(@as(u32, 0x04040404));
+    indices += @splat(@as(u32, 0x03020100));
+    break :table32x4_indices @bitCast(indices);
 };
 
 // There are only 2 lanes, so we can afford to load the index vector directly.
 const indices64x2: [4 * 16]u8 align(16) = table32x4_indices: {
-    var table_indices = @as(@Vector(4 * 2, u64), getLaneIndicesTable(2));
-    table_indices *= @splat(@as(u64, 0x08080808_08080808));
-    table_indices += @splat(@as(u64, 0x07060504_03020100));
-    break :table32x4_indices @bitCast(table_indices);
+    var indices = @as(@Vector(4 * 2, u64), getLaneIndicesTable(2));
+    indices *= @splat(@as(u64, 0x08080808_08080808));
+    indices += @splat(@as(u64, 0x07060504_03020100));
+    break :table32x4_indices @bitCast(indices);
 };
 
 fn idxFromBits128(comptime T: type, mask_bits: u64) @Vector(16, u8) {
