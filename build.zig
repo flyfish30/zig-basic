@@ -19,7 +19,9 @@ pub fn build(b: *std.Build) void {
         .name = "zig-example",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = .{
+            .src_path = .{ .owner = b, .sub_path = "src/main.zig" },
+        },
         .target = target,
         .optimize = optimize,
     });
@@ -47,7 +49,9 @@ pub fn build(b: *std.Build) void {
     }
 
     if (has_c_intrins) {
-        exe.addIncludePath(.{ .path = "./inc" });
+        exe.addIncludePath(.{
+            .src_path = .{ .owner = b, .sub_path = "./inc" },
+        });
         const cfiles = [_][]const u8{intrins_file};
         const cflags = [_][]const u8{"-O2"};
         exe.addCSourceFiles(.{
@@ -87,7 +91,9 @@ pub fn build(b: *std.Build) void {
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = .{
+            .src_path = .{ .owner = b, .sub_path = "src/main.zig" },
+        },
         .target = target,
         .optimize = optimize,
     });
@@ -97,7 +103,9 @@ pub fn build(b: *std.Build) void {
     unit_tests.linkLibrary(zstbi.artifact("zstbi"));
 
     if (has_c_intrins) {
-        unit_tests.addIncludePath(.{ .path = "./inc" });
+        unit_tests.addIncludePath(.{
+            .src_path = .{ .owner = b, .sub_path = "./inc" },
+        });
         const cfiles = [_][]const u8{intrins_file};
         const cflags = [_][]const u8{"-O2"};
         unit_tests.addCSourceFiles(.{
