@@ -1,0 +1,180 @@
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
+
+pub fn algSample() !void {
+    const ArrayListFunctor = Functor(ArrayListFunctorInst, ArrayList);
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    var arr = ArrayList(u32).init(allocator);
+    defer arr.deinit();
+    var i: u32 = 0;
+    while (i < 8) : (i += 1) {
+        try arr.append(i);
+    }
+
+    const array_f = ArrayListFunctor.init(.{ .allocator = allocator });
+    arr = array_f.fmap(.InplaceMap, struct {
+        pub fn f(a: u32) u32 {
+            return a + 42;
+        }
+    }.f, arr);
+    std.debug.print("arr mapped: {any}\n", .{arr.items});
+
+    const arr_new = array_f.fmap(.NewValMap, struct {
+        pub fn f(a: u32) f64 {
+            return @as(f64, @floatFromInt(a)) * 3.14;
+        }
+    }.f, arr);
+    defer arr_new.deinit();
+    std.debug.print("arr_new: {any}\n", .{arr_new.items});
+    return;
+}
+
+fn MapFnInType(comptime MapFn: type) type {
+    const len = @typeInfo(MapFn).Fn.params.len;
+
+    if (len != 1) {
+        @compileError("The map function must only one parameter");
+    }
+    return @typeInfo(MapFn).Fn.params[0].type.?;
+}
+
+fn MapFnRetType(comptime MapFn: type) type {
+    const R = @typeInfo(MapFn).Fn.return_type.?;
+
+    if (R == noreturn) {
+        @compileError("The return type of map function must not be noreturn");
+    }
+    return R;
+}
+
+fn AnyMapFn(a: anytype, b: anytype) type {
+    return fn (@TypeOf(a)) @TypeOf(b);
+}
+
+/// The kind of map function for new a translated value or inplace replace by
+/// translated value.
+pub const MapFnKind = enum {
+    /// Need new a value for translated value, the caller should to free new
+    /// value.
+    NewValMap,
+    /// Just inplace replace with translated value, the bitsize of translated
+    /// value must equal bitsize of origin value.
+    InplaceMap,
+};
+
+// fn FMapType(
+//     // F is instance of Functor typeclass, such as Maybe, List
+//     comptime F: fn (comptime T: type) type,
+//     mapFn: anytype
+// ) type {
+//     const T = MapFnInType(@TypeOf(mapFn));
+//     const R = MapFnRetType(@TypeOf(mapFn));
+//     return *const fn (comptime T: type, comptime R: type, mapFn: fn(T) R, fa: F(T)) F(R);
+// }
+
+/// FMapFn create a struct type that will to run map function
+// FMapFn: *const fn (comptime K: MapFnKind, comptime MapFnT: type) type,
+
+/// Functor typeclass like in Haskell.
+/// F is instance of Functor typeclass, such as Maybe, List
+pub fn Functor(comptime FunctorInst: type, comptime F: fn (comptime T: type) type) type {
+    return struct {
+        instance: FunctorInst,
+
+        const Self = @This();
+        const FMapType = @TypeOf(struct {
+            fn fmapFn(
+                instance: FunctorInst,
+                comptime K: MapFnKind,
+                // f: a -> b, fa: F a
+                f: anytype,
+                fa: F(MapFnInType(@TypeOf(f))),
+            ) F(MapFnInType(@TypeOf(f))) {
+                _ = instance;
+                _ = fa;
+                _ = K;
+            }
+        }.fmapFn);
+
+        pub fn init(instance: FunctorInst) Self {
+            if (@TypeOf(FunctorInst.fmap) != FMapType) {
+                @compileError("Funtor instance " ++ @typeName(FunctorInst) ++ " has incorrect type of fmap");
+            }
+            return .{
+                .instance = instance,
+            };
+        }
+
+        pub inline fn fmap(
+            self: Self,
+            comptime K: MapFnKind,
+            // mapFn: a -> b, fa: F a
+            mapFn: anytype,
+            fa: F(MapFnInType(@TypeOf(mapFn))),
+        ) F(MapFnRetType(@TypeOf(mapFn))) {
+            return self.instance.fmap(K, mapFn, fa);
+        }
+    };
+}
+
+const ArrayListCtx = struct {
+    allocator: Allocator,
+};
+
+const ArrayListFunctorInst = struct {
+    allocator: Allocator,
+
+    const Self = @This();
+
+    /// FMapFn create a struct type that will to run map function
+    // fn FMapFn(comptime K: MapFnKind, comptime MapFnT: type) type;
+
+    fn FaType(comptime Fn: type) type {
+        return ArrayList(MapFnInType(Fn));
+    }
+
+    fn FbType(comptime Fn: type) type {
+        return ArrayList(MapFnRetType(Fn));
+    }
+
+    pub fn fmap(self: Self, comptime K: MapFnKind, mapFn: anytype, fa: FaType(@TypeOf(mapFn))) FbType(@TypeOf(mapFn)) {
+        switch (K) {
+            .InplaceMap => {
+                const fb = self.mapInplace(mapFn, fa) catch FbType(@TypeOf(mapFn)).init(self.allocator);
+                return fb;
+            },
+            .NewValMap => {
+                const fb = self.mapNewValue(mapFn, fa) catch FbType(@TypeOf(mapFn)).init(self.allocator);
+                return fb;
+            },
+        }
+    }
+
+    fn mapInplace(self: Self, mapFn: anytype, fa: FaType(@TypeOf(mapFn))) !FbType(@TypeOf(mapFn)) {
+        const A = MapFnInType(@TypeOf(mapFn));
+        const B = MapFnRetType(@TypeOf(mapFn));
+        if (@bitSizeOf(A) != @bitSizeOf(B)) {
+            @compileError("The bitsize of translated value is not equal origin value, failed to map it");
+        }
+
+        var arr = fa;
+        var slice = try arr.toOwnedSlice();
+        var i: usize = 0;
+        while (i < slice.len) : (i += 1) {
+            slice[i] = @bitCast(mapFn(slice[i]));
+        }
+        return ArrayList(B).fromOwnedSlice(self.allocator, @ptrCast(slice));
+    }
+
+    fn mapNewValue(self: Self, mapFn: anytype, fa: FaType(@TypeOf(mapFn))) !FbType(@TypeOf(mapFn)) {
+        const B = MapFnRetType(@TypeOf(mapFn));
+        var fb = try ArrayList(B).initCapacity(self.allocator, fa.items.len);
+        for (fa.items) |item| {
+            fb.append(mapFn(item)) catch {};
+        }
+        return fb;
+    }
+};
