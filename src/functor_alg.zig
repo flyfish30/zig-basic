@@ -3,71 +3,8 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
 pub fn algSample() !void {
-    const ArrayListApplicative = Applicative(ArrayListFunctorInst, ArrayList);
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-
-    var arr = ArrayList(u32).init(allocator);
-    defer arr.deinit();
-    var i: u32 = 0;
-    while (i < 8) : (i += 1) {
-        try arr.append(i);
-    }
-
-    // example of functor
-    const array_f = ArrayListApplicative.init(.{ .allocator = allocator });
-    arr = array_f.fmap(.InplaceMap, struct {
-        pub fn f(a: u32) u32 {
-            return a + 42;
-        }
-    }.f, arr);
-    std.debug.print("arr mapped: {any}\n", .{arr.items});
-
-    const arr_new = array_f.fmap(.NewValMap, struct {
-        pub fn f(a: u32) f64 {
-            return @as(f64, @floatFromInt(a)) * 3.14;
-        }
-    }.f, arr);
-    defer arr_new.deinit();
-    std.debug.print("arr_new: {any}\n", .{arr_new.items});
-
-    // example of applicative functor
-    const FloatToIntFn = *const fn (f64) u32;
-    const fn_array = [_]FloatToIntFn{
-        struct {
-            pub fn f(x: f64) u32 {
-                return @intFromFloat(@floor(x));
-            }
-        }.f,
-        struct {
-            pub fn f(x: f64) u32 {
-                return @intFromFloat(@ceil(x * 4.0));
-            }
-        }.f,
-    };
-
-    var arr_fn = try ArrayList(FloatToIntFn).initCapacity(allocator, fn_array.len);
-    defer arr_fn.deinit();
-    for (fn_array) |f| {
-        arr_fn.appendAssumeCapacity(f);
-    }
-
-    const arr_applied = array_f.apply(f64, u32, arr_fn, arr_new);
-    defer arr_applied.deinit();
-    std.debug.print("arr_applied: {any}\n", .{arr_applied.items});
-
-    // example of monad
-    const arr_binded = array_f.bind(f64, u32, arr_new, struct {
-        pub fn f(inst: @TypeOf(array_f), a: f64) ArrayList(u32) {
-            var arr_b = ArrayList(u32).initCapacity(inst.allocator, 2) catch ArrayList(u32).init(inst.allocator);
-            arr_b.appendAssumeCapacity(@intFromFloat(@ceil(a * 4.0)));
-            arr_b.appendAssumeCapacity(@intFromFloat(@ceil(a * 9.0)));
-            return arr_b;
-        }
-    }.f);
-    defer arr_binded.deinit();
-    std.debug.print("arr_binded: {any}\n", .{arr_binded.items});
-    return;
+    try maybeSample();
+    try arraylistSample();
 }
 
 fn MapFnInType(comptime MapFn: type) type {
@@ -122,6 +59,14 @@ pub fn Functor(comptime FunctorInst: type, comptime F: fn (comptime T: type) typ
     return struct {
         const Self = @This();
 
+        fn FaType(comptime Fn: type) type {
+            return F(MapFnInType(Fn));
+        }
+
+        fn FbType(comptime Fn: type) type {
+            return F(MapFnRetType(Fn));
+        }
+
         const FMapType = @TypeOf(struct {
             fn fmapFn(
                 instance: FunctorInst,
@@ -159,7 +104,7 @@ pub fn Applicative(comptime ApplicativeInst: type, comptime F: fn (comptime T: t
         }.pureFn);
 
         const ApplyType = @TypeOf(struct {
-            fn applyFn(
+            fn fapplyFn(
                 instance: ApplicativeInst,
                 comptime A: type,
                 comptime B: type,
@@ -171,7 +116,7 @@ pub fn Applicative(comptime ApplicativeInst: type, comptime F: fn (comptime T: t
                 _ = ff;
                 _ = fa;
             }
-        }.applyFn);
+        }.fapplyFn);
 
         pub fn init(instance: ApplicativeInst) ApplicativeInst {
             const sup = FunctorSup.init(instance);
@@ -179,8 +124,8 @@ pub fn Applicative(comptime ApplicativeInst: type, comptime F: fn (comptime T: t
             if (@TypeOf(ApplicativeInst.pure) != PureType) {
                 @compileError("Incorrect type of pure for Funtor instance " ++ @typeName(ApplicativeInst));
             }
-            if (@TypeOf(ApplicativeInst.apply) != ApplyType) {
-                @compileError("Incorrect type of apply for Funtor instance " ++ @typeName(ApplicativeInst));
+            if (@TypeOf(ApplicativeInst.fapply) != ApplyType) {
+                @compileError("Incorrect type of fapply for Funtor instance " ++ @typeName(ApplicativeInst));
             }
             return sup;
         }
@@ -220,20 +165,111 @@ pub fn Monad(comptime MonadInst: type, comptime M: fn (comptime T: type) type) t
     };
 }
 
-const ArrayListFunctorInst = struct {
+fn Maybe(comptime a: type) type {
+    return ?a;
+}
+
+const MaybeMonadInst = struct {
+    none: void,
+
+    const Self = @This();
+
+    const FaType = Functor(Self, Maybe).FaType;
+    const FbType = Functor(Self, Maybe).FbType;
+
+    pub fn fmap(self: Self, comptime K: MapFnKind, mapFn: anytype, fa: FaType(@TypeOf(mapFn))) FbType(@TypeOf(mapFn)) {
+        _ = self;
+        _ = K;
+        if (fa) |a| {
+            return mapFn(a);
+        }
+
+        return null;
+    }
+
+    pub fn pure(self: Self, a: anytype) Maybe(@TypeOf(a)) {
+        _ = self;
+        return a;
+    }
+
+    pub fn fapply(
+        self: Self,
+        comptime A: type,
+        comptime B: type,
+        // applicative function: Maybe (a -> b), fa: Maybe a
+        ff: Maybe(*const fn (A) B),
+        fa: Maybe(A),
+    ) Maybe(B) {
+        _ = self;
+        if (ff) |f| {
+            if (fa) |a| {
+                return f(a);
+            }
+        }
+        return null;
+    }
+
+    pub fn bind(
+        self: Self,
+        comptime A: type,
+        comptime B: type,
+        // monad function: (a -> M b), ma: M a
+        ma: Maybe(A),
+        f: *const fn (Self, A) Maybe(B),
+    ) Maybe(B) {
+        if (ma) |a| {
+            return f(self, a);
+        }
+        return null;
+    }
+};
+
+fn maybeSample() !void {
+    const MaybeMonad = Monad(MaybeMonadInst, Maybe);
+    const maybe_m = MaybeMonad.init(.{ .none = {} });
+
+    var maybe_a: ?u32 = 42;
+    maybe_a = maybe_m.fmap(.InplaceMap, struct {
+        fn f(a: u32) u32 {
+            return a + 10;
+        }
+    }.f, maybe_a);
+
+    const maybe_b = maybe_m.fmap(.NewValMap, struct {
+        fn f(a: u32) f64 {
+            return @as(f64, @floatFromInt(a)) + 3.14;
+        }
+    }.f, maybe_a);
+    std.debug.print("mapped maybe_a: {any}, maybe_b: {any}\n", .{ maybe_a, maybe_b });
+
+    const maybe_fn: ?*const fn (f64) u32 = struct {
+        pub fn f(x: f64) u32 {
+            return @intFromFloat(@floor(x));
+        }
+    }.f;
+    var maybe_applied = maybe_m.fapply(f64, u32, maybe_fn, maybe_b);
+    std.debug.print("maybe_applied: {any}\n", .{maybe_applied});
+    maybe_applied = maybe_m.fapply(u32, u32, null, maybe_applied);
+    std.debug.print("applied with null function: {any}\n", .{maybe_applied});
+
+    const maybe_binded = maybe_m.bind(f64, u32, maybe_b, struct {
+        pub fn f(self: MaybeMonadInst, x: f64) ?u32 {
+            _ = self;
+            return @intFromFloat(@ceil(x * 4.0));
+        }
+    }.f);
+    std.debug.print("maybe_binded: {any}\n", .{maybe_binded});
+}
+
+const ArrayListMonadInst = struct {
     allocator: Allocator,
 
     const Self = @This();
 
     const ARRAY_DEFAULT_LEN = 4;
 
-    fn FaType(comptime Fn: type) type {
-        return ArrayList(MapFnInType(Fn));
-    }
-
-    fn FbType(comptime Fn: type) type {
-        return ArrayList(MapFnRetType(Fn));
-    }
+    const FaType = Functor(Self, ArrayList).FaType;
+    const FbType = Functor(Self, ArrayList).FbType;
 
     pub fn fmap(self: Self, comptime K: MapFnKind, mapFn: anytype, fa: FaType(@TypeOf(mapFn))) FbType(@TypeOf(mapFn)) {
         switch (K) {
@@ -279,7 +315,7 @@ const ArrayListFunctorInst = struct {
         return arr;
     }
 
-    pub fn apply(
+    pub fn fapply(
         self: Self,
         comptime A: type,
         comptime B: type,
@@ -316,3 +352,72 @@ const ArrayListFunctorInst = struct {
         return mb;
     }
 };
+
+fn arraylistSample() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    const ArrayListMonad = Monad(ArrayListMonadInst, ArrayList);
+    const array_m = ArrayListMonad.init(.{ .allocator = allocator });
+
+    var arr = ArrayList(u32).init(allocator);
+    defer arr.deinit();
+    var i: u32 = 0;
+    while (i < 8) : (i += 1) {
+        try arr.append(i);
+    }
+
+    // example of functor
+    arr = array_m.fmap(.InplaceMap, struct {
+        pub fn f(a: u32) u32 {
+            return a + 42;
+        }
+    }.f, arr);
+    std.debug.print("arr mapped: {any}\n", .{arr.items});
+
+    const arr_new = array_m.fmap(.NewValMap, struct {
+        pub fn f(a: u32) f64 {
+            return @as(f64, @floatFromInt(a)) * 3.14;
+        }
+    }.f, arr);
+    defer arr_new.deinit();
+    std.debug.print("arr_new: {any}\n", .{arr_new.items});
+
+    // example of applicative functor
+    const FloatToIntFn = *const fn (f64) u32;
+    const fn_array = [_]FloatToIntFn{
+        struct {
+            pub fn f(x: f64) u32 {
+                return @intFromFloat(@floor(x));
+            }
+        }.f,
+        struct {
+            pub fn f(x: f64) u32 {
+                return @intFromFloat(@ceil(x * 4.0));
+            }
+        }.f,
+    };
+
+    var arr_fn = try ArrayList(FloatToIntFn).initCapacity(allocator, fn_array.len);
+    defer arr_fn.deinit();
+    for (fn_array) |f| {
+        arr_fn.appendAssumeCapacity(f);
+    }
+
+    const arr_applied = array_m.fapply(f64, u32, arr_fn, arr_new);
+    defer arr_applied.deinit();
+    std.debug.print("arr_applied: {any}\n", .{arr_applied.items});
+
+    // example of monad
+    const arr_binded = array_m.bind(f64, u32, arr_new, struct {
+        pub fn f(inst: @TypeOf(array_m), a: f64) ArrayList(u32) {
+            var arr_b = ArrayList(u32).initCapacity(inst.allocator, 2) catch ArrayList(u32).init(inst.allocator);
+            arr_b.appendAssumeCapacity(@intFromFloat(@ceil(a * 4.0)));
+            arr_b.appendAssumeCapacity(@intFromFloat(@ceil(a * 9.0)));
+            return arr_b;
+        }
+    }.f);
+    defer arr_binded.deinit();
+    std.debug.print("arr_binded: {any}\n", .{arr_binded.items});
+    return;
+}
