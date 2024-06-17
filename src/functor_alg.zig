@@ -14,6 +14,7 @@ pub fn algSample() !void {
         try arr.append(i);
     }
 
+    // example of functor
     const array_f = ArrayListApplicative.init(.{ .allocator = allocator });
     arr = array_f.fmap(.InplaceMap, struct {
         pub fn f(a: u32) u32 {
@@ -30,6 +31,7 @@ pub fn algSample() !void {
     defer arr_new.deinit();
     std.debug.print("arr_new: {any}\n", .{arr_new.items});
 
+    // example of applicative functor
     const FloatToIntFn = *const fn (f64) u32;
     const fn_array = [_]FloatToIntFn{
         struct {
@@ -53,6 +55,18 @@ pub fn algSample() !void {
     const arr_applied = array_f.apply(f64, u32, arr_fn, arr_new);
     defer arr_applied.deinit();
     std.debug.print("arr_applied: {any}\n", .{arr_applied.items});
+
+    // example of monad
+    const arr_binded = array_f.bind(f64, u32, arr_new, struct {
+        pub fn f(inst: @TypeOf(array_f), a: f64) ArrayList(u32) {
+            var arr_b = ArrayList(u32).initCapacity(inst.allocator, 2) catch ArrayList(u32).init(inst.allocator);
+            arr_b.appendAssumeCapacity(@intFromFloat(@ceil(a * 4.0)));
+            arr_b.appendAssumeCapacity(@intFromFloat(@ceil(a * 9.0)));
+            return arr_b;
+        }
+    }.f);
+    defer arr_binded.deinit();
+    std.debug.print("arr_binded: {any}\n", .{arr_binded.items});
     return;
 }
 
@@ -124,14 +138,14 @@ pub fn Functor(comptime FunctorInst: type, comptime F: fn (comptime T: type) typ
 
         pub fn init(instance: FunctorInst) FunctorInst {
             if (@TypeOf(FunctorInst.fmap) != FMapType) {
-                @compileError("Funtor instance " ++ @typeName(FunctorInst) ++ " has incorrect type of fmap");
+                @compileError("Incorrect type of fmap for Funtor instance " ++ @typeName(FunctorInst));
             }
             return instance;
         }
     };
 }
 
-/// Applicative Functor typeclass like in Haskell.
+/// Applicative Functor typeclass like in Haskell, it inherit from Functor.
 /// F is instance of Applicative Functor typeclass, such as Maybe, List
 pub fn Applicative(comptime ApplicativeInst: type, comptime F: fn (comptime T: type) type) type {
     return struct {
@@ -160,15 +174,48 @@ pub fn Applicative(comptime ApplicativeInst: type, comptime F: fn (comptime T: t
         }.applyFn);
 
         pub fn init(instance: ApplicativeInst) ApplicativeInst {
-            const functor = FunctorSup.init(instance);
+            const sup = FunctorSup.init(instance);
 
             if (@TypeOf(ApplicativeInst.pure) != PureType) {
-                @compileError("Applicative instance " ++ @typeName(ApplicativeInst) ++ " has incorrect type of pure");
+                @compileError("Incorrect type of pure for Funtor instance " ++ @typeName(ApplicativeInst));
             }
             if (@TypeOf(ApplicativeInst.apply) != ApplyType) {
-                @compileError("Applicative instance " ++ @typeName(ApplicativeInst) ++ " has incorrect type of apply");
+                @compileError("Incorrect type of apply for Funtor instance " ++ @typeName(ApplicativeInst));
             }
-            return functor;
+            return sup;
+        }
+    };
+}
+
+/// Monad Functor typeclass like in Haskell, it inherit from Applicative Functor.
+/// M is instance of Monad typeclass, such as Maybe, List
+pub fn Monad(comptime MonadInst: type, comptime M: fn (comptime T: type) type) type {
+    return struct {
+        const Self = @This();
+        const ApplicativeSup = Applicative(MonadInst, M);
+
+        const BindType = @TypeOf(struct {
+            fn bindFn(
+                instance: MonadInst,
+                comptime A: type,
+                comptime B: type,
+                // monad function: (a -> M b), ma: M a
+                ma: M(A),
+                f: *const fn (MonadInst, A) M(B),
+            ) M(B) {
+                _ = instance;
+                _ = ma;
+                _ = f;
+            }
+        }.bindFn);
+
+        pub fn init(instance: MonadInst) MonadInst {
+            const sup = ApplicativeSup.init(instance);
+
+            if (@TypeOf(MonadInst.bind) != BindType) {
+                @compileError("Incorrect type of bind for Funtor instance " ++ @typeName(MonadInst));
+            }
+            return sup;
         }
     };
 }
@@ -179,9 +226,6 @@ const ArrayListFunctorInst = struct {
     const Self = @This();
 
     const ARRAY_DEFAULT_LEN = 4;
-
-    /// FMapFn create a struct type that will to run map function
-    // fn FMapFn(comptime K: MapFnKind, comptime MapFnT: type) type;
 
     fn FaType(comptime Fn: type) type {
         return ArrayList(MapFnInType(Fn));
@@ -251,5 +295,24 @@ const ArrayListFunctorInst = struct {
             }
         }
         return fb;
+    }
+
+    pub fn bind(
+        self: Self,
+        comptime A: type,
+        comptime B: type,
+        // monad function: (a -> M b), ma: M a
+        ma: ArrayList(A),
+        f: *const fn (Self, A) ArrayList(B),
+    ) ArrayList(B) {
+        var mb = ArrayList(B).init(self.allocator);
+        for (ma.items) |a| {
+            const tmp_mb = f(self, a);
+            defer tmp_mb.deinit();
+            for (tmp_mb.items) |b| {
+                mb.append(b) catch break;
+            }
+        }
+        return mb;
     }
 };
