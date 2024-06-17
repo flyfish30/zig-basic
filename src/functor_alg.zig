@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
 pub fn algSample() !void {
-    const ArrayListFunctor = Functor(ArrayListFunctorInst, ArrayList);
+    const ArrayListApplicative = Applicative(ArrayListFunctorInst, ArrayList);
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
@@ -14,7 +14,7 @@ pub fn algSample() !void {
         try arr.append(i);
     }
 
-    const array_f = ArrayListFunctor.init(.{ .allocator = allocator });
+    const array_f = ArrayListApplicative.init(.{ .allocator = allocator });
     arr = array_f.fmap(.InplaceMap, struct {
         pub fn f(a: u32) u32 {
             return a + 42;
@@ -29,6 +29,30 @@ pub fn algSample() !void {
     }.f, arr);
     defer arr_new.deinit();
     std.debug.print("arr_new: {any}\n", .{arr_new.items});
+
+    const FloatToIntFn = *const fn (f64) u32;
+    const fn_array = [_]FloatToIntFn{
+        struct {
+            pub fn f(x: f64) u32 {
+                return @intFromFloat(@floor(x));
+            }
+        }.f,
+        struct {
+            pub fn f(x: f64) u32 {
+                return @intFromFloat(@ceil(x * 4.0));
+            }
+        }.f,
+    };
+
+    var arr_fn = try ArrayList(FloatToIntFn).initCapacity(allocator, fn_array.len);
+    defer arr_fn.deinit();
+    for (fn_array) |f| {
+        arr_fn.appendAssumeCapacity(f);
+    }
+
+    const arr_applied = array_f.apply(f64, u32, arr_fn, arr_new);
+    defer arr_applied.deinit();
+    std.debug.print("arr_applied: {any}\n", .{arr_applied.items});
     return;
 }
 
@@ -82,9 +106,8 @@ pub const MapFnKind = enum {
 /// F is instance of Functor typeclass, such as Maybe, List
 pub fn Functor(comptime FunctorInst: type, comptime F: fn (comptime T: type) type) type {
     return struct {
-        instance: FunctorInst,
-
         const Self = @This();
+
         const FMapType = @TypeOf(struct {
             fn fmapFn(
                 instance: FunctorInst,
@@ -99,35 +122,63 @@ pub fn Functor(comptime FunctorInst: type, comptime F: fn (comptime T: type) typ
             }
         }.fmapFn);
 
-        pub fn init(instance: FunctorInst) Self {
+        pub fn init(instance: FunctorInst) FunctorInst {
             if (@TypeOf(FunctorInst.fmap) != FMapType) {
                 @compileError("Funtor instance " ++ @typeName(FunctorInst) ++ " has incorrect type of fmap");
             }
-            return .{
-                .instance = instance,
-            };
-        }
-
-        pub inline fn fmap(
-            self: Self,
-            comptime K: MapFnKind,
-            // mapFn: a -> b, fa: F a
-            mapFn: anytype,
-            fa: F(MapFnInType(@TypeOf(mapFn))),
-        ) F(MapFnRetType(@TypeOf(mapFn))) {
-            return self.instance.fmap(K, mapFn, fa);
+            return instance;
         }
     };
 }
 
-const ArrayListCtx = struct {
-    allocator: Allocator,
-};
+/// Applicative Functor typeclass like in Haskell.
+/// F is instance of Applicative Functor typeclass, such as Maybe, List
+pub fn Applicative(comptime ApplicativeInst: type, comptime F: fn (comptime T: type) type) type {
+    return struct {
+        const Self = @This();
+        const FunctorSup = Functor(ApplicativeInst, F);
+
+        const PureType = @TypeOf(struct {
+            fn pureFn(instance: ApplicativeInst, a: anytype) F(@TypeOf(a)) {
+                _ = instance;
+            }
+        }.pureFn);
+
+        const ApplyType = @TypeOf(struct {
+            fn applyFn(
+                instance: ApplicativeInst,
+                comptime A: type,
+                comptime B: type,
+                // applicative function: F (a -> b), fa: F a
+                ff: F(*const fn (A) B),
+                fa: F(A),
+            ) F(B) {
+                _ = instance;
+                _ = ff;
+                _ = fa;
+            }
+        }.applyFn);
+
+        pub fn init(instance: ApplicativeInst) ApplicativeInst {
+            const functor = FunctorSup.init(instance);
+
+            if (@TypeOf(ApplicativeInst.pure) != PureType) {
+                @compileError("Applicative instance " ++ @typeName(ApplicativeInst) ++ " has incorrect type of pure");
+            }
+            if (@TypeOf(ApplicativeInst.apply) != ApplyType) {
+                @compileError("Applicative instance " ++ @typeName(ApplicativeInst) ++ " has incorrect type of apply");
+            }
+            return functor;
+        }
+    };
+}
 
 const ArrayListFunctorInst = struct {
     allocator: Allocator,
 
     const Self = @This();
+
+    const ARRAY_DEFAULT_LEN = 4;
 
     /// FMapFn create a struct type that will to run map function
     // fn FMapFn(comptime K: MapFnKind, comptime MapFnT: type) type;
@@ -173,7 +224,31 @@ const ArrayListFunctorInst = struct {
         const B = MapFnRetType(@TypeOf(mapFn));
         var fb = try ArrayList(B).initCapacity(self.allocator, fa.items.len);
         for (fa.items) |item| {
-            fb.append(mapFn(item)) catch {};
+            fb.appendAssumeCapacity(mapFn(item));
+        }
+        return fb;
+    }
+
+    pub fn pure(self: Self, a: anytype) ArrayList(@TypeOf(a)) {
+        var arr = ArrayList(@TypeOf(a)).initCapacity(self.allocator, ARRAY_DEFAULT_LEN);
+        arr.append(a);
+        return arr;
+    }
+
+    pub fn apply(
+        self: Self,
+        comptime A: type,
+        comptime B: type,
+        // applicative function: ArrayList (a -> b), fa: ArrayList a
+        ff: ArrayList(*const fn (A) B),
+        fa: ArrayList(A),
+    ) ArrayList(B) {
+        var fb = ArrayList(B)
+            .initCapacity(self.allocator, ff.items.len * fa.items.len) catch ArrayList(B).init(self.allocator);
+        for (ff.items) |f| {
+            for (fa.items) |item| {
+                fb.appendAssumeCapacity(f(item));
+            }
         }
         return fb;
     }
