@@ -7,6 +7,7 @@ const sortv = @import("sort_vectors.zig");
 const sortn = @import("sorting_networks.zig");
 const vqsort = @import("vqsort.zig");
 const funalg = @import("functor_alg.zig");
+const default = @import("default.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -37,6 +38,8 @@ pub fn main() !void {
     if (std.os.argv.len > 1) {
         try img.readAndProcessImage(std.mem.span(std.os.argv[1]));
     }
+
+    try defaultSample();
 }
 
 fn vecSortSample() void {
@@ -86,5 +89,38 @@ fn vqsortSample() !void {
     const is_sorted = vqsort.isSorted(IntType, array_int);
     // std.debug.print("vqsort array_int is: {any}\n", .{array_int});
     std.debug.print("vqsort array_int is_sorted={any}\n", .{is_sorted});
+    return;
+}
+
+const Default = default.Default;
+const BaseNoneDefaultInst = default.BaseNoneDefaultInst;
+const VectorDefaultInst = default.VectorDefaultInst;
+const DeriveNoneDefaultInst = default.DeriveNoneDefaultInst;
+
+fn defaultSample() !void {
+    const i32_def = Default(BaseNoneDefaultInst(i32), i32).init(.{ .none = {} });
+    std.debug.print("i32 default is {d}\n", .{i32_def.default()});
+
+    const Vec1 = @Vector(8, i32);
+    const vec_def = Default(VectorDefaultInst(Vec1), Vec1).init(.{ .none = {} });
+    std.debug.print("Vec(8, i32) default is {any}\n", .{vec_def.default()});
+
+    const Gender = enum {
+        Male,
+        Female,
+    };
+
+    const Struct1 = struct {
+        age: u8,
+        name: [:0]u8,
+        address: [:0]u8,
+        postcode: ?[*:0]u8,
+        gender: Gender,
+        score: u32,
+    };
+    const struct_def = Default(DeriveNoneDefaultInst(Struct1), Struct1).init(.{ .none = {} });
+    const def_val = struct_def.default();
+    std.debug.print("Struct1 default is {any}\n", .{def_val});
+    std.debug.print("struct1 name: {s}", .{def_val.name});
     return;
 }
