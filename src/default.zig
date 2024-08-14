@@ -141,8 +141,8 @@ fn defaultPointerValue(comptime T: type) T {
     const info = @typeInfo(T).Pointer;
     switch (info.size) {
         .Slice => {
-            if (info.sentinel) |se| {
-                const p: *info.child = @constCast(@ptrCast(se));
+            if (info.sentinel) |sentinel| {
+                const p: *info.child = @constCast(@ptrCast(sentinel));
                 const array = [_]info.child{p.*};
                 return @constCast(@ptrCast(array[0..]));
             } else {

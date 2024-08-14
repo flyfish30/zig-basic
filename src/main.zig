@@ -46,7 +46,7 @@ fn vecSortSample() void {
     const IntType = u8;
     const N = comptime VecLen(IntType);
     const N_VECS = 16;
-    var prnd = std.rand.DefaultPrng.init(83751737);
+    var prnd = std.rand.DefaultPrng.init(83754737);
     var array_int: [N * N_VECS]IntType = undefined;
     for (&array_int) |*a| {
         a.* = prnd.random().int(IntType);
@@ -110,7 +110,7 @@ fn defaultSample() !void {
         Female,
     };
 
-    const Struct1 = struct {
+    const Person = struct {
         age: u8,
         name: [:0]u8,
         address: [:0]u8,
@@ -118,9 +118,9 @@ fn defaultSample() !void {
         gender: Gender,
         score: u32,
     };
-    const struct_def = Default(DeriveNoneDefaultInst(Struct1), Struct1).init(.{ .none = {} });
-    const def_val = struct_def.default();
-    std.debug.print("Struct1 default is {any}\n", .{def_val});
-    std.debug.print("struct1 name: {s}", .{def_val.name});
+    const person_def = Default(DeriveNoneDefaultInst(Person), Person).init(.{ .none = {} });
+    const def_val = person_def.default();
+    std.debug.print("Person default is {any}\n", .{def_val});
+    std.debug.print("person name: {s}", .{def_val.name});
     return;
 }
