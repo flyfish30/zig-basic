@@ -139,6 +139,10 @@ pub fn Functor(comptime FunctorInst: type, comptime F: fn (comptime T: type) typ
         @compileError("The Functor instance must has type function: BaseType!");
     }
 
+    if (!@hasDecl(FunctorInst, "deinitFa")) {
+        @compileError("The Functor instance must has type function: BaseType!");
+    }
+
     return struct {
         const Self = @This();
         const InstanceType = FunctorInst;
@@ -368,6 +372,16 @@ pub fn ComposeInst(comptime InstanceF: type, comptime InstanceG: type) type {
             return F(MapLamRetType(MapLam));
         }
 
+        pub fn deinitFa(comptime FA: type, fga: FA, comptime free_fn: fn (BaseType(FA)) void) void {
+            const free_ga_fn = struct {
+                fn freeGa(ga: InstanceF.BaseType(FA)) void {
+                    InstanceG.deinitFa(@TypeOf(ga), ga, free_fn);
+                    return;
+                }
+            }.freeGa;
+            InstanceF.deinitFa(@TypeOf(fga), fga, free_ga_fn);
+        }
+
         pub fn fmap(
             self: *Self,
             comptime K: MapFnKind,
@@ -491,10 +505,18 @@ pub fn ComposeInst(comptime InstanceF: type, comptime InstanceG: type) type {
                 }
             }{ .inner_instance = &self.instanceG };
 
+            const free_fn = struct {
+                fn free_fn(lam: @TypeOf(inner_fapply).ApplyLam) void {
+                    _ = lam;
+                }
+            }.free_fn;
+
+            const flam = self.instanceF.fmapLam(.NewValMapRef, inner_fapply, @constCast(&fgf));
+            defer InstanceF.deinitFa(@TypeOf(flam), flam, free_fn);
             return self.instanceF.fapplyLam(
                 InstanceG.F(A),
                 InstanceG.F(B),
-                self.instanceF.fmapLam(.NewValMapRef, inner_fapply, @constCast(&fgf)),
+                flam,
                 fga,
             );
         }
@@ -549,6 +571,13 @@ const MaybeMonadInst = struct {
     const FbLamType = Functor(Self, F).FbLamType;
     const SelfFaType = Functor(Self, F).SelfFaType;
     const SelfFbType = Functor(Self, F).SelfFbType;
+
+    pub fn deinitFa(comptime FA: type, fa: FA, comptime free_fn: fn (BaseType(FA)) void) void {
+        if (fa) |a| {
+            free_fn(a);
+        }
+        return;
+    }
 
     pub fn fmap(
         self: *Self,
@@ -700,6 +729,14 @@ const ArrayListMonadInst = struct {
     const FbType = Functor(Self, F).FbType;
     const FaLamType = Functor(Self, F).FaLamType;
     const FbLamType = Functor(Self, F).FbLamType;
+
+    pub fn deinitFa(comptime FA: type, fa: FA, comptime free_fn: fn (BaseType(FA)) void) void {
+        for (fa.items) |item| {
+            free_fn(item);
+        }
+        fa.deinit();
+        return;
+    }
 
     pub fn fmap(
         self: *Self,
@@ -924,6 +961,7 @@ fn arraylistSample() !void {
 
 fn composeSample() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
 
     const allocator = gpa.allocator();
     const ArrayListApplicative = Applicative(ArrayListMonadInst, ArrayList);
@@ -1003,30 +1041,35 @@ fn composeSample() !void {
         }.f,
     };
 
-    var int_fns_default = try ArrayList(IntToIntFn).initCapacity(allocator, 0);
-    defer int_fns_default.deinit();
+    const int_fns_default = try ArrayList(IntToIntFn).initCapacity(allocator, 0);
 
     const intToFns = struct {
         allocator: Allocator,
         fns: []IntToIntFn,
-        fns_default: *ArrayList(IntToIntFn),
+        fns_default: ArrayList(IntToIntFn),
 
         const FnSelf = @This();
         fn call(self: *const FnSelf, a: u32) ArrayList(IntToIntFn) {
             _ = a;
-            var arr1_fn = ArrayList(IntToIntFn).initCapacity(self.allocator, self.fns.len) catch self.fns_default.*;
+            var arr1_fn = ArrayList(IntToIntFn).initCapacity(self.allocator, self.fns.len) catch self.fns_default;
             for (self.fns) |f| {
                 arr1_fn.appendAssumeCapacity(f);
             }
             return arr1_fn;
         }
-    }{ .allocator = allocator, .fns = fn_int_array[0..2], .fns_default = &int_fns_default };
+    }{ .allocator = allocator, .fns = fn_int_array[0..2], .fns_default = int_fns_default };
 
     var arr3_fns = array_maybe.fmapLam(.NewValMap, intToFns, arr);
-    defer arr3_fns.deinit();
+    defer {
+        for (arr3_fns.items) |item| {
+            if (item) |o| {
+                o.deinit();
+            }
+        }
+        arr3_fns.deinit();
+    }
 
-    var int_arr3_default = try ArrayList(u32).initCapacity(allocator, 0);
-    defer int_arr3_default.deinit();
+    const int_arr_default = try ArrayList(u32).initCapacity(allocator, 0);
 
     const intToArr = struct {
         allocator: Allocator,
@@ -1045,16 +1088,16 @@ fn composeSample() !void {
             }
             return int_arr;
         }
-    }{ .allocator = allocator, .ints_default = int_arr3_default };
+    }{ .allocator = allocator, .ints_default = int_arr_default };
 
     var arr3_ints = array_maybe.fmapLam(.NewValMap, intToArr, arr_applied);
-    defer arr3_ints.deinit();
     defer {
         for (arr3_ints.items) |item| {
             if (item) |o| {
                 o.deinit();
             }
         }
+        arr3_ints.deinit();
     }
     std.debug.print("arr3_ints: {any}\n", .{arr3_ints.items});
 
@@ -1067,13 +1110,13 @@ fn composeSample() !void {
     });
 
     const arr3_appried = array_maybe_array.fapply(u32, u32, arr3_fns, arr3_ints);
-    defer arr3_appried.deinit();
     defer {
         for (arr3_appried.items) |item| {
             if (item) |o| {
                 o.deinit();
             }
         }
+        arr3_appried.deinit();
     }
     std.debug.print("arr3_appried: {any}\n", .{arr3_appried.items});
 
