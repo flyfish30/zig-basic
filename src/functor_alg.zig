@@ -372,14 +372,17 @@ pub fn ComposeInst(comptime InstanceF: type, comptime InstanceG: type) type {
             return F(MapLamRetType(MapLam));
         }
 
-        pub fn deinitFa(comptime FA: type, fga: FA, comptime free_fn: fn (BaseType(FA)) void) void {
+        pub fn deinitFa(
+            fga: anytype, // F(G(A))
+            comptime free_fn: fn (BaseType(@TypeOf(fga))) void,
+        ) void {
             const free_ga_fn = struct {
-                fn freeGa(ga: InstanceF.BaseType(FA)) void {
-                    InstanceG.deinitFa(@TypeOf(ga), ga, free_fn);
+                fn freeGa(ga: InstanceF.BaseType(@TypeOf(fga))) void {
+                    InstanceG.deinitFa(ga, free_fn);
                     return;
                 }
             }.freeGa;
-            InstanceF.deinitFa(@TypeOf(fga), fga, free_ga_fn);
+            InstanceF.deinitFa(fga, free_ga_fn);
         }
 
         pub fn fmap(
@@ -410,18 +413,18 @@ pub fn ComposeInst(comptime InstanceF: type, comptime InstanceG: type) type {
             const MapLam = @TypeOf(map_lam);
             const map_inner = struct {
                 inner_g: *InstanceG,
-                inner_map_lam: MapLam,
+                map_lam: MapLam,
 
                 const InnerSelf = @This();
                 fn call(
                     inner_self: *const InnerSelf,
                     ga: FunctorG.FaLamType(K, MapLam),
                 ) FunctorG.FbLamType(MapLam) {
-                    return inner_self.inner_g.fmapLam(K, inner_self.inner_map_lam, ga);
+                    return inner_self.inner_g.fmapLam(K, inner_self.map_lam, ga);
                 }
             }{
                 .inner_g = &self.instanceG,
-                .inner_map_lam = map_lam,
+                .map_lam = map_lam,
             };
 
             return self.instanceF.fmapLam(K, map_inner, fga);
@@ -491,17 +494,17 @@ pub fn ComposeInst(comptime InstanceF: type, comptime InstanceG: type) type {
                     }
                 };
 
-                // mapFn \gf_p -> applyLam : G (a -> b) -> G a -> G b
+                // mapFn \gf_p -> apply_lam : G (a -> b) -> G a -> G b
                 fn call(
                     inner_self: *const InnerSelf,
                     gf_p: *InstanceG.F(FnOrLambdaType),
                 ) ApplyLam {
-                    const applyLam = .{
+                    const apply_lam = .{
                         .apply_instanceG = inner_self.inner_instance,
                         .apply_gf_p = gf_p,
                     };
                     // apply lambda \ga -> fapply instanceG gf ga : G a -> G b
-                    return applyLam;
+                    return apply_lam;
                 }
             }{ .inner_instance = &self.instanceG };
 
@@ -512,7 +515,7 @@ pub fn ComposeInst(comptime InstanceF: type, comptime InstanceG: type) type {
             }.free_fn;
 
             const flam = self.instanceF.fmapLam(.NewValMapRef, inner_fapply, @constCast(&fgf));
-            defer InstanceF.deinitFa(@TypeOf(flam), flam, free_fn);
+            defer InstanceF.deinitFa(flam, free_fn);
             return self.instanceF.fapplyLam(
                 InstanceG.F(A),
                 InstanceG.F(B),
@@ -572,7 +575,10 @@ const MaybeMonadInst = struct {
     const SelfFaType = Functor(Self, F).SelfFaType;
     const SelfFbType = Functor(Self, F).SelfFbType;
 
-    pub fn deinitFa(comptime FA: type, fa: FA, comptime free_fn: fn (BaseType(FA)) void) void {
+    pub fn deinitFa(
+        fa: anytype, // Maybe(A)
+        comptime free_fn: fn (BaseType(@TypeOf(fa))) void,
+    ) void {
         if (fa) |a| {
             free_fn(a);
         }
@@ -730,7 +736,10 @@ const ArrayListMonadInst = struct {
     const FaLamType = Functor(Self, F).FaLamType;
     const FbLamType = Functor(Self, F).FbLamType;
 
-    pub fn deinitFa(comptime FA: type, fa: FA, comptime free_fn: fn (BaseType(FA)) void) void {
+    pub fn deinitFa(
+        fa: anytype, // ArrayList(A)
+        comptime free_fn: fn (BaseType(@TypeOf(fa))) void,
+    ) void {
         for (fa.items) |item| {
             free_fn(item);
         }
@@ -935,13 +944,13 @@ fn arraylistSample() !void {
         }.f,
     };
 
-    var arr_fn = try ArrayList(FloatToIntFn).initCapacity(allocator, fn_array.len);
-    defer arr_fn.deinit();
+    var arr_fns = try ArrayList(FloatToIntFn).initCapacity(allocator, fn_array.len);
+    defer arr_fns.deinit();
     for (fn_array) |f| {
-        arr_fn.appendAssumeCapacity(f);
+        arr_fns.appendAssumeCapacity(f);
     }
 
-    const arr_applied = array_m.fapply(f64, u32, arr_fn, arr_new);
+    const arr_applied = array_m.fapply(f64, u32, arr_fns, arr_new);
     defer arr_applied.deinit();
     std.debug.print("arr_applied: {any}\n", .{arr_applied.items});
 
@@ -1015,16 +1024,42 @@ fn composeSample() !void {
         }.f,
     };
 
-    var arr_fn = try ArrayList(Maybe(FloatToIntFn)).initCapacity(allocator, fn_array.len + 1);
-    defer arr_fn.deinit();
+    var arr_fns = try ArrayList(Maybe(FloatToIntFn)).initCapacity(allocator, fn_array.len + 1);
+    defer arr_fns.deinit();
     for (fn_array) |f| {
-        arr_fn.appendAssumeCapacity(f);
+        arr_fns.appendAssumeCapacity(f);
     }
-    arr_fn.appendAssumeCapacity(null);
+    arr_fns.appendAssumeCapacity(null);
 
-    const arr_applied = array_maybe.fapply(f64, u32, arr_fn, arr_new);
+    const arr_applied = array_maybe.fapply(f64, u32, arr_fns, arr_new);
     defer arr_applied.deinit();
     std.debug.print("arr_applied: {any}\n", .{arr_applied.items});
+
+    // pretty print the arr3 with type ArrayList(Maybe(ArrayList(A))
+    const prettyPrintArr3 = struct {
+        fn prettyPrint(arr3: anytype) void {
+            std.debug.print("{{ \n", .{});
+            var j: u32 = 0;
+            for (arr3.items) |item| {
+                if (item) |o| {
+                    std.debug.print(" {{ ", .{});
+                    for (o.items) |a| {
+                        std.debug.print("{any},", .{a});
+                    }
+                    std.debug.print(" }},", .{});
+                } else {
+                    std.debug.print(" {any},", .{item});
+                }
+
+                j += 1;
+                if (j == 16) {
+                    j = 0;
+                    std.debug.print("\n", .{});
+                }
+            }
+            std.debug.print("}}\n", .{});
+        }
+    }.prettyPrint;
 
     // example of compose three applicative functor
     const IntToIntFn = *const fn (u32) u32;
@@ -1099,7 +1134,7 @@ fn composeSample() !void {
         }
         arr3_ints.deinit();
     }
-    std.debug.print("arr3_ints: {any}\n", .{arr3_ints.items});
+    // std.debug.print("arr3_ints: {any}\n", .{arr3_ints.items});
 
     const ArrayMaybeArrayApplicative = ComposeApplicative(ArrayListMaybeApplicative, ArrayListApplicative);
     var array_maybe_array = ArrayMaybeArrayApplicative.init(.{
@@ -1118,7 +1153,8 @@ fn composeSample() !void {
         }
         arr3_appried.deinit();
     }
-    std.debug.print("arr3_appried: {any}\n", .{arr3_appried.items});
+    std.debug.print("arr3_appried: ", .{});
+    prettyPrintArr3(arr3_appried);
 
     return;
 }
