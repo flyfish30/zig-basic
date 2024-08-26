@@ -600,6 +600,16 @@ pub fn productFG(
     }.Producted;
 }
 
+pub fn productLeftRightType(comptime P: type) struct { type, type } {
+    const info = @typeInfo(P);
+    comptime assert(info == .Struct and info.Struct.is_tuple == true);
+    comptime assert(info.Struct.fields.len == 2);
+
+    const l_type = info.Struct.fields[0].type;
+    const r_type = info.Struct.fields[1].type;
+    return .{ l_type, r_type };
+}
+
 pub fn ProductInst(comptime InstanceF: type, comptime InstanceG: type) type {
     return struct {
         instanceF: InstanceF,
@@ -616,11 +626,7 @@ pub fn ProductInst(comptime InstanceF: type, comptime InstanceG: type) type {
         /// In this instance, type F(A) is product (F(A), G(A)) by InstanceF and
         /// InstanceG.
         pub fn BaseType(comptime FGA: type) type {
-            const info = @typeInfo(FGA);
-            comptime assert(info == .Struct and info.Struct.is_tuple == true);
-
-            const l_type = info.Struct.fields[0].type;
-            const r_type = info.Struct.fields[1].type;
+            const l_type, const r_type = productLeftRightType(FGA);
             comptime assert(InstanceF.BaseType(l_type) == InstanceG.BaseType(r_type));
             return InstanceF.BaseType(l_type);
         }
@@ -746,6 +752,16 @@ pub fn coproductFG(
     }.Coproducted;
 }
 
+pub fn coproductLeftRightType(comptime U: type) struct { type, type } {
+    const info = @typeInfo(U);
+    comptime assert(info == .Union);
+    comptime assert(info.Union.fields.len == 2);
+
+    const l_type = info.Union.fields[0].type;
+    const r_type = info.Union.fields[1].type;
+    return .{ l_type, r_type };
+}
+
 pub fn CoproductInst(comptime InstanceF: type, comptime InstanceG: type) type {
     return CoproductApplicativeInst(InstanceF, InstanceG, void);
 }
@@ -772,13 +788,9 @@ pub fn CoproductApplicativeInst(
         /// In this instance, type F(A) is product (F(A), G(A)) by InstanceF and
         /// InstanceG.
         pub fn BaseType(comptime FGA: type) type {
-            const info = @typeInfo(FGA);
-            comptime assert(info == .Union);
-
-            const inl_type = info.Union.fields[0].type;
-            const inr_type = info.Union.fields[1].type;
-            comptime assert(InstanceF.BaseType(inl_type) == InstanceG.BaseType(inr_type));
-            return InstanceF.BaseType(inl_type);
+            const l_type, const r_type = coproductLeftRightType(FGA);
+            comptime assert(InstanceF.BaseType(l_type) == InstanceG.BaseType(r_type));
+            return InstanceF.BaseType(l_type);
         }
 
         fn FaType(comptime K: MapFnKind, comptime MapFn: type) type {
@@ -1660,7 +1672,7 @@ fn productSample() !void {
 
     const arr_and_maybe_applied = array_and_maybe.fapply(f64, u32, arr_and_maybe_fns, arr_and_maybe_new);
     defer arr_and_maybe_applied[0].deinit();
-    std.debug.print("arr_and_maybe_new: ", .{});
+    std.debug.print("arr_and_maybe_applied: ", .{});
     prettyArrayAndMaybe(arr_and_maybe_applied);
 }
 
