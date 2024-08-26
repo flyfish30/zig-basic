@@ -1142,6 +1142,9 @@ const ArrayListMonadInst = struct {
         fa.deinit();
     }
 
+    /// If the returned array list of inplace map function assign to a new
+    /// variable, then the array list in original variable should be reset
+    /// to empty.
     pub fn fmap(
         self: *Self,
         comptime K: MapFnKind,
@@ -1191,8 +1194,11 @@ const ArrayListMonadInst = struct {
             @compileError("The bitsize of translated value is not equal origin value, failed to map it");
         }
 
-        var arr = fa;
-        var slice = arr.toOwnedSlice() catch @panic("ArrayListMonadInst: No memory to get owned slice of Arraylist!");
+        const arr = if (@typeInfo(@TypeOf(fa)) == .Pointer)
+            @constCast(fa).moveToUnmanaged()
+        else
+            @constCast(&fa).moveToUnmanaged();
+        var slice = arr.items;
         var i: usize = 0;
         while (i < slice.len) : (i += 1) {
             if (comptime isMapRef(K)) {
@@ -1362,7 +1368,21 @@ fn arraylistSample() !void {
             return a + 42;
         }
     }.f, arr);
-    std.debug.print("arr mapped: {any}\n", .{arr.items});
+    std.debug.print("arr inplace mapped: {any}\n", .{arr.items});
+
+    const arr_f32 = array_m.fmap(.InplaceMap, struct {
+        fn f(a: u32) f32 {
+            return @as(f32, @floatFromInt(a)) + 6.18;
+        }
+    }.f, arr);
+    std.debug.print("arr float32 inplace mapped: {any}\n", .{arr_f32.items});
+
+    arr = array_m.fmap(.InplaceMap, struct {
+        fn f(a: f32) u32 {
+            return @as(u32, @intFromFloat(a)) + 58;
+        }
+    }.f, arr_f32);
+    std.debug.print("arr inplace mapped again: {any}\n", .{arr.items});
 
     const arr_new = array_m.fmap(.NewValMap, struct {
         fn f(a: u32) f64 {
