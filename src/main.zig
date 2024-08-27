@@ -40,6 +40,7 @@ pub fn main() !void {
     }
 
     try defaultSample();
+    try errorSample();
 }
 
 fn vecSortSample() void {
@@ -122,5 +123,18 @@ fn defaultSample() !void {
     const def_val = person_def.default();
     std.debug.print("Person default is {any}\n", .{def_val});
     std.debug.print("person name: {s}", .{def_val.name});
+    return;
+}
+
+fn errorSample() Allocator.Error!void {
+    var a: u32 = 0;
+    _ = &a;
+    if (a == 42) {
+        // If return error.BadNumber, it will cause a
+        // error: expected type 'error{OutOfMemory}', found type 'error{BadNumber}'
+        // return error.BadNumber;
+        return error.OutOfMemory;
+    }
+
     return;
 }
