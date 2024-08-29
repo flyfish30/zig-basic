@@ -121,6 +121,15 @@ const FMapMode = enum {
     LambdaMap,
 };
 
+/// Check the type E whether it is a ErrorUnion, if true then return A as under
+/// type of ErrorUnion, else just return type E.
+pub fn isErrorUnionOrVal(comptime E: type) struct { bool, type } {
+    const info = @typeInfo(E);
+    const has_error = if (info == .ErrorUnion) true else false;
+    const A = if (has_error) info.ErrorUnion.payload else E;
+    return .{ has_error, A };
+}
+
 // fn FMapType(
 //     // F is instance of Functor typeclass, such as Maybe, List
 //     comptime F: fn (comptime T: type) type,
@@ -134,25 +143,8 @@ const FMapMode = enum {
 /// FMapFn create a struct type that will to run map function
 // FMapFn: *const fn (comptime K: MapFnKind, comptime MapFnT: type) type,
 
-/// Functor typeclass like in Haskell.
-/// F is Constructor Type of Functor typeclass, such as Maybe, List.
-pub fn Functor(comptime FunctorInst: type, comptime F: fn (comptime T: type) type) type {
-    if (!@hasDecl(FunctorInst, "F")) {
-        @compileError("The Functor instance must has F type!");
-    }
-
-    if (!@hasDecl(FunctorInst, "BaseType")) {
-        @compileError("The Functor instance must has type function: BaseType!");
-    }
-
-    if (!@hasDecl(FunctorInst, "deinitFa")) {
-        @compileError("The Functor instance must has deinitFa function!");
-    }
-
+pub fn FunctorFxTypes(comptime F: fn (comptime T: type) type, comptime E: type) type {
     return struct {
-        const Self = @This();
-        const InstanceType = FunctorInst;
-
         fn FaType(comptime K: MapFnKind, comptime MapFn: type) type {
             if (comptime isMapRef(K)) {
                 // The fa paramerter of fmap function is also a reference.
@@ -163,7 +155,12 @@ pub fn Functor(comptime FunctorInst: type, comptime F: fn (comptime T: type) typ
         }
 
         fn FbType(comptime MapFn: type) type {
-            return F(MapFnRetType(MapFn));
+            const info = @typeInfo(MapFnRetType(MapFn));
+            if (info != .ErrorUnion) {
+                return E!F(MapFnRetType(MapFn));
+            }
+
+            return (E || info.ErrorUnion.error_set)!F(info.ErrorUnion.payload);
         }
 
         fn FaLamType(comptime K: MapFnKind, comptime MapLam: type) type {
@@ -176,8 +173,46 @@ pub fn Functor(comptime FunctorInst: type, comptime F: fn (comptime T: type) typ
         }
 
         fn FbLamType(comptime MapLam: type) type {
-            return F(MapLamRetType(MapLam));
+            const info = @typeInfo((MapLamRetType(MapLam)));
+            if (info != .ErrorUnion) {
+                return E!F(MapLamRetType(MapLam));
+            }
+
+            return (E || info.ErrorUnion.error_set)!F(info.ErrorUnion.payload);
         }
+    };
+}
+
+/// Functor typeclass like in Haskell.
+/// F is Constructor Type of Functor typeclass, such as Maybe, List.
+pub fn Functor(comptime FunctorInst: type, comptime F: fn (comptime T: type) type) type {
+    if (!@hasDecl(FunctorInst, "F")) {
+        @compileError("The Functor instance must has F type!");
+    }
+
+    if (!@hasDecl(FunctorInst, "BaseType")) {
+        @compileError("The Functor instance must has type function: BaseType!");
+    }
+
+    if (!@hasDecl(FunctorInst, "Error")) {
+        @compileError("The Functor instance must has Error type!");
+    }
+
+    if (!@hasDecl(FunctorInst, "deinitFa")) {
+        @compileError("The Functor instance must has deinitFa function!");
+    }
+
+    return struct {
+        const Self = @This();
+        const InstanceType = FunctorInst;
+
+        pub const Error = InstanceType.Error;
+
+        pub const FxTypes = FunctorFxTypes(F, Error);
+        pub const FaType = FxTypes.FaType;
+        pub const FbType = FxTypes.FbType;
+        pub const FaLamType = FxTypes.FaLamType;
+        pub const FbLamType = FxTypes.FbLamType;
 
         /// Typeclass function for map with function
         const FMapType = @TypeOf(struct {
@@ -230,7 +265,7 @@ pub fn NatTransType(
     }.transFn);
 }
 
-/// Natural Translation typeclass like in Haskell.
+/// Natural Transformation typeclass like in Haskell.
 /// F and G is Constructor Type of Functor typeclass, such as Maybe, List.
 pub fn NatTrans(
     comptime NatTransInst: type,
@@ -238,7 +273,11 @@ pub fn NatTrans(
     comptime G: fn (comptime T: type) type,
 ) type {
     if (!(@hasDecl(NatTransInst, "F") and @hasDecl(NatTransInst, "G"))) {
-        @compileError("The Functor instance must has F and G type!");
+        @compileError("The natural transformation instance must has F and G type!");
+    }
+
+    if (!(@hasDecl(NatTransInst, "Error"))) {
+        @compileError("The natural transformation instance must has Error type!");
     }
 
     return struct {
@@ -246,7 +285,11 @@ pub fn NatTrans(
         const InstanceType = NatTransInst;
 
         const FTransType = @TypeOf(struct {
-            fn transFn(instance: *InstanceType, comptime A: type, fa: F(A)) G(A) {
+            fn transFn(
+                instance: *InstanceType,
+                comptime A: type,
+                fa: F(A),
+            ) NatTransInst.Error!G(A) {
                 _ = instance;
                 _ = fa;
             }
@@ -261,6 +304,25 @@ pub fn NatTrans(
     };
 }
 
+pub fn ApplicativeFxTypes(comptime F: fn (comptime T: type) type, comptime E: type) type {
+    return struct {
+        /// return type of pure a
+        fn APaType(comptime A: type) type {
+            return E!F(A);
+        }
+
+        /// return type of fapply
+        fn AFbType(comptime B: type) type {
+            const has_err, const _B = comptime isErrorUnionOrVal(B);
+            if (has_err) {
+                return (E || @typeInfo(B).ErrorUnion.error_set)!F(_B);
+            } else {
+                return E!F(B);
+            }
+        }
+    };
+}
+
 /// Applicative Functor typeclass like in Haskell, it inherit from Functor.
 /// F is instance of Applicative Functor typeclass, such as Maybe, List
 pub fn Applicative(comptime ApplicativeInst: type, comptime F: fn (comptime T: type) type) type {
@@ -269,8 +331,14 @@ pub fn Applicative(comptime ApplicativeInst: type, comptime F: fn (comptime T: t
         const FunctorSup = Functor(ApplicativeInst, F);
         const InstanceType = ApplicativeInst;
 
+        pub const Error = InstanceType.Error;
+
+        const AFxTypes = ApplicativeFxTypes(F, Error);
+        pub const APaType = AFxTypes.APaType;
+        pub const AFbType = AFxTypes.AFbType;
+
         const PureType = @TypeOf(struct {
-            fn pureFn(instance: *InstanceType, a: anytype) F(@TypeOf(a)) {
+            fn pureFn(instance: *InstanceType, a: anytype) APaType(@TypeOf(a)) {
                 _ = instance;
             }
         }.pureFn);
@@ -283,7 +351,7 @@ pub fn Applicative(comptime ApplicativeInst: type, comptime F: fn (comptime T: t
                 // applicative function: F (a -> b), fa: F a
                 ff: F(*const fn (A) B),
                 fa: F(A),
-            ) F(B) {
+            ) AFbType(B) {
                 _ = instance;
                 _ = ff;
                 _ = fa;
@@ -298,7 +366,7 @@ pub fn Applicative(comptime ApplicativeInst: type, comptime F: fn (comptime T: t
                 // applicative function: F (a -> b), fa: F a
                 flam: anytype, // a F(lambda) that present F(*const fn (A) B),
                 fa: F(A),
-            ) F(B) {
+            ) AFbType(B) {
                 _ = instance;
                 _ = flam;
                 _ = fa;
@@ -332,6 +400,15 @@ pub fn Applicative(comptime ApplicativeInst: type, comptime F: fn (comptime T: t
     };
 }
 
+pub fn MonadFxTypes(comptime F: fn (comptime T: type) type, comptime E: type) type {
+    return struct {
+        /// return type of bind
+        fn MbType(comptime B: type) type {
+            return E!F(B);
+        }
+    };
+}
+
 /// Monad Functor typeclass like in Haskell, it inherit from Applicative Functor.
 /// M is instance of Monad typeclass, such as Maybe, List
 pub fn Monad(comptime MonadInst: type, comptime M: fn (comptime T: type) type) type {
@@ -340,6 +417,10 @@ pub fn Monad(comptime MonadInst: type, comptime M: fn (comptime T: type) type) t
         const ApplicativeSup = Applicative(MonadInst, M);
         const InstanceType = MonadInst;
 
+        pub const Error = InstanceType.Error;
+
+        pub const MbType = MonadFxTypes(M, Error).MbType;
+
         const BindType = @TypeOf(struct {
             fn bindFn(
                 instance: *InstanceType,
@@ -347,8 +428,8 @@ pub fn Monad(comptime MonadInst: type, comptime M: fn (comptime T: type) type) t
                 comptime B: type,
                 // monad function: (a -> M b), ma: M a
                 ma: M(A),
-                f: *const fn (*InstanceType, A) M(B),
-            ) M(B) {
+                f: *const fn (*InstanceType, A) MbType(B),
+            ) MbType(B) {
                 _ = instance;
                 _ = ma;
                 _ = f;
@@ -398,27 +479,19 @@ pub fn ComposeInst(comptime InstanceF: type, comptime InstanceG: type) type {
             return InstanceG.BaseType(InstanceF.BaseType(FGA));
         }
 
-        fn FaType(comptime K: MapFnKind, comptime MapFn: type) type {
-            if (comptime isMapRef(K)) {
-                return *F(MapFnInType(K, MapFn));
-            } else {
-                return F(MapFnInType(K, MapFn));
-            }
-        }
-        fn FbType(comptime MapFn: type) type {
-            return F(MapFnRetType(MapFn));
-        }
+        /// Error set of ComposeInst, it is a merge set of error sets in
+        /// InstanceF and InstanceG
+        pub const Error = InstanceF.Error || InstanceG.Error;
 
-        fn FaLamType(comptime K: MapFnKind, comptime MapLam: type) type {
-            if (comptime isMapRef(K)) {
-                return *F(MapLamInType(K, MapLam));
-            } else {
-                return F(MapLamInType(K, MapLam));
-            }
-        }
-        fn FbLamType(comptime MapLam: type) type {
-            return F(MapLamRetType(MapLam));
-        }
+        const FxTypes = FunctorFxTypes(F, Error);
+        pub const FaType = FxTypes.FaType;
+        pub const FbType = FxTypes.FbType;
+        pub const FaLamType = FxTypes.FaLamType;
+        pub const FbLamType = FxTypes.FbLamType;
+
+        const AFxTypes = ApplicativeFxTypes(F, Error);
+        pub const APaType = AFxTypes.APaType;
+        pub const AFbType = AFxTypes.AFbType;
 
         pub fn deinitFa(
             fga: anytype, // F(G(A))
@@ -443,8 +516,8 @@ pub fn ComposeInst(comptime InstanceF: type, comptime InstanceG: type) type {
                 map_fn: *const fn (a: MapFnInType(K, MapFn)) MapFnRetType(MapFn),
 
                 const MapSelf = @This();
-                pub fn call(mapSelf: *const MapSelf, a: MapFnInType(K, MapFn)) MapFnRetType(MapFn) {
-                    return mapSelf.map_fn(a);
+                pub fn call(map_self: *const MapSelf, a: MapFnInType(K, MapFn)) MapFnRetType(MapFn) {
+                    return map_self.map_fn(a);
                 }
             }{ .map_fn = &map_fn };
 
@@ -477,7 +550,7 @@ pub fn ComposeInst(comptime InstanceF: type, comptime InstanceG: type) type {
             return self.instanceF.fmapLam(K, map_inner, fga);
         }
 
-        pub fn pure(self: *Self, a: anytype) F(@TypeOf(a)) {
+        pub fn pure(self: *Self, a: anytype) APaType(@TypeOf(a)) {
             return self.instanceF.pure(self.instanceG.pure(a));
         }
 
@@ -488,7 +561,7 @@ pub fn ComposeInst(comptime InstanceF: type, comptime InstanceG: type) type {
             // applicative function: F (a -> b), fa: F a
             fgf: F(*const fn (A) B),
             fga: F(A),
-        ) F(B) {
+        ) AFbType(B) {
             return fapplyGeneric(self, .NormalMap, A, B, fgf, fga);
         }
 
@@ -499,7 +572,7 @@ pub fn ComposeInst(comptime InstanceF: type, comptime InstanceG: type) type {
             // applicative function: F (a -> b), fa: F a
             fgf: anytype,
             fga: F(A),
-        ) F(B) {
+        ) AFbType(B) {
             return fapplyGeneric(self, .LambdaMap, A, B, fgf, fga);
         }
 
@@ -511,7 +584,7 @@ pub fn ComposeInst(comptime InstanceF: type, comptime InstanceG: type) type {
             // applicative function: F (a -> b), fa: F a
             fgf: anytype,
             fga: F(A),
-        ) F(B) {
+        ) AFbType(B) {
             // inner_fapply: G (a -> b) -> G a -> G b
             // outer_fapply: F (G a -> G b) -> F (G a) -> F (G b)
             // fmap inner_fapply: F (G (a -> b)) -> F (G a -> G b)
@@ -532,7 +605,7 @@ pub fn ComposeInst(comptime InstanceF: type, comptime InstanceG: type) type {
 
                     const ApplySelf = @This();
                     // applyFn: G a -> G b
-                    fn call(applySelf: *const ApplySelf, ga: InstanceG.F(A)) InstanceG.F(B) {
+                    fn call(applySelf: *const ApplySelf, ga: InstanceG.F(A)) InstanceG.AFbType(B) {
                         if (M == .NormalMap) {
                             return applySelf.apply_instanceG.fapply(A, B, applySelf.apply_gf_p.*, ga);
                         } else {
@@ -561,11 +634,11 @@ pub fn ComposeInst(comptime InstanceF: type, comptime InstanceG: type) type {
                 }
             }.free_fn;
 
-            const flam = self.instanceF.fmapLam(.NewValMapRef, inner_fapply, @constCast(&fgf));
+            const flam = try self.instanceF.fmapLam(.NewValMapRef, inner_fapply, @constCast(&fgf));
             defer InstanceF.deinitFa(flam, free_fn);
             return self.instanceF.fapplyLam(
                 InstanceG.F(A),
-                InstanceG.F(B),
+                InstanceG.AFbType(B),
                 flam,
                 fga,
             );
@@ -631,27 +704,17 @@ pub fn ProductInst(comptime InstanceF: type, comptime InstanceG: type) type {
             return InstanceF.BaseType(l_type);
         }
 
-        fn FaType(comptime K: MapFnKind, comptime MapFn: type) type {
-            if (comptime isMapRef(K)) {
-                return *F(MapFnInType(K, MapFn));
-            } else {
-                return F(MapFnInType(K, MapFn));
-            }
-        }
-        fn FbType(comptime MapFn: type) type {
-            return F(MapFnRetType(MapFn));
-        }
+        pub const Error = InstanceF.Error || InstanceG.Error;
 
-        fn FaLamType(comptime K: MapFnKind, comptime MapLam: type) type {
-            if (comptime isMapRef(K)) {
-                return *F(MapLamInType(K, MapLam));
-            } else {
-                return F(MapLamInType(K, MapLam));
-            }
-        }
-        fn FbLamType(comptime MapLam: type) type {
-            return F(MapLamRetType(MapLam));
-        }
+        const FxTypes = FunctorFxTypes(F, Error);
+        pub const FaType = FxTypes.FaType;
+        pub const FbType = FxTypes.FbType;
+        pub const FaLamType = FxTypes.FaLamType;
+        pub const FbLamType = FxTypes.FbLamType;
+
+        const AFxTypes = ApplicativeFxTypes(F, Error);
+        pub const APaType = AFxTypes.APaType;
+        pub const AFbType = AFxTypes.AFbType;
 
         pub fn deinitFa(
             fga: anytype, // (F(A), G(A))
@@ -668,8 +731,8 @@ pub fn ProductInst(comptime InstanceF: type, comptime InstanceG: type) type {
             fga: FaType(K, @TypeOf(map_fn)),
         ) FbType(@TypeOf(map_fn)) {
             return .{
-                self.instanceF.fmap(K, map_fn, fga[0]),
-                self.instanceG.fmap(K, map_fn, fga[1]),
+                try self.instanceF.fmap(K, map_fn, fga[0]),
+                try self.instanceG.fmap(K, map_fn, fga[1]),
             };
         }
 
@@ -680,15 +743,15 @@ pub fn ProductInst(comptime InstanceF: type, comptime InstanceG: type) type {
             fga: FaLamType(K, @TypeOf(map_lam)),
         ) FbLamType(@TypeOf(map_lam)) {
             return .{
-                self.instanceF.fmapLam(K, map_lam, fga[0]),
-                self.instanceG.fmapLam(K, map_lam, fga[1]),
+                try self.instanceF.fmapLam(K, map_lam, fga[0]),
+                try self.instanceG.fmapLam(K, map_lam, fga[1]),
             };
         }
 
-        pub fn pure(self: *Self, a: anytype) F(@TypeOf(a)) {
+        pub fn pure(self: *Self, a: anytype) APaType(@TypeOf(a)) {
             return .{
-                self.instanceF.pure(a),
-                self.instanceG.pure(a),
+                try self.instanceF.pure(a),
+                try self.instanceG.pure(a),
             };
         }
 
@@ -699,10 +762,10 @@ pub fn ProductInst(comptime InstanceF: type, comptime InstanceG: type) type {
             // applicative function: F (a -> b), fa: F a
             fgf: F(*const fn (A) B),
             fga: F(A),
-        ) F(B) {
+        ) AFbType(B) {
             return .{
-                self.instanceF.fapply(A, B, fgf[0], fga[0]),
-                self.instanceG.fapply(A, B, fgf[1], fga[1]),
+                try self.instanceF.fapply(A, B, fgf[0], fga[0]),
+                try self.instanceG.fapply(A, B, fgf[1], fga[1]),
             };
         }
 
@@ -713,10 +776,10 @@ pub fn ProductInst(comptime InstanceF: type, comptime InstanceG: type) type {
             // applicative function: F (a -> b), fa: F a
             fgf: anytype,
             fga: F(A),
-        ) F(B) {
+        ) AFbType(B) {
             return .{
-                self.instanceF.fapplyLam(A, B, fgf[0], fga[0]),
-                self.instanceG.fapplyLam(A, B, fgf[1], fga[1]),
+                try self.instanceF.fapplyLam(A, B, fgf[0], fga[0]),
+                try self.instanceG.fapplyLam(A, B, fgf[1], fga[1]),
             };
         }
     };
@@ -793,27 +856,17 @@ pub fn CoproductApplicativeInst(
             return InstanceF.BaseType(l_type);
         }
 
-        fn FaType(comptime K: MapFnKind, comptime MapFn: type) type {
-            if (comptime isMapRef(K)) {
-                return *F(MapFnInType(K, MapFn));
-            } else {
-                return F(MapFnInType(K, MapFn));
-            }
-        }
-        fn FbType(comptime MapFn: type) type {
-            return F(MapFnRetType(MapFn));
-        }
+        pub const Error = InstanceF.Error || InstanceG.Error;
 
-        fn FaLamType(comptime K: MapFnKind, comptime MapLam: type) type {
-            if (comptime isMapRef(K)) {
-                return *F(MapLamInType(K, MapLam));
-            } else {
-                return F(MapLamInType(K, MapLam));
-            }
-        }
-        fn FbLamType(comptime MapLam: type) type {
-            return F(MapLamRetType(MapLam));
-        }
+        const FxTypes = FunctorFxTypes(F, Error);
+        pub const FaType = FxTypes.FaType;
+        pub const FbType = FxTypes.FbType;
+        pub const FaLamType = FxTypes.FaLamType;
+        pub const FbLamType = FxTypes.FbLamType;
+
+        const AFxTypes = ApplicativeFxTypes(F, Error);
+        pub const APaType = AFxTypes.APaType;
+        pub const AFbType = AFxTypes.AFbType;
 
         pub fn deinitFa(
             fga: anytype, // (F(A), G(A))
@@ -830,8 +883,8 @@ pub fn CoproductApplicativeInst(
             fga: FaType(K, @TypeOf(map_fn)),
         ) FbType(@TypeOf(map_fn)) {
             return switch (fga) {
-                .inl => |fa| .{ .inl = self.instanceF.fmap(K, map_fn, fa) },
-                .inr => |ga| .{ .inr = self.instanceG.fmap(K, map_fn, ga) },
+                .inl => |fa| .{ .inl = try self.instanceF.fmap(K, map_fn, fa) },
+                .inr => |ga| .{ .inr = try self.instanceG.fmap(K, map_fn, ga) },
             };
         }
 
@@ -842,13 +895,13 @@ pub fn CoproductApplicativeInst(
             fga: FaLamType(K, @TypeOf(map_lam)),
         ) FbLamType(@TypeOf(map_lam)) {
             return switch (fga) {
-                .inl => |fa| .{ .inl = self.instanceF.fmapLam(K, map_lam, fa) },
-                .inr => |ga| .{ .inr = self.instanceG.fmapLam(K, map_lam, ga) },
+                .inl => |fa| .{ .inl = try self.instanceF.fmapLam(K, map_lam, fa) },
+                .inr => |ga| .{ .inr = try self.instanceG.fmapLam(K, map_lam, ga) },
             };
         }
 
-        pub fn pure(self: *Self, a: anytype) F(@TypeOf(a)) {
-            return .{ .inr = self.instanceG.pure(a) };
+        pub fn pure(self: *Self, a: anytype) APaType(@TypeOf(a)) {
+            return .{ .inr = try self.instanceG.pure(a) };
         }
 
         pub fn fapply(
@@ -858,26 +911,26 @@ pub fn CoproductApplicativeInst(
             // applicative function: F (a -> b), fa: F a
             fgf: F(*const fn (A) B),
             fga: F(A),
-        ) F(B) {
+        ) AFbType(B) {
             const FnType = BaseType(@TypeOf(fgf));
             return switch (fgf) {
                 .inl => |ff| switch (fga) {
-                    .inl => |fa| .{ .inl = self.instanceF.fapply(A, B, ff, fa) },
+                    .inl => |fa| .{ .inl = try self.instanceF.fapply(A, B, ff, fa) },
                     .inr => |ga| {
                         // fa is ArrayList(A), so we should be free it.
-                        const fa = self.natural_gf.trans(A, ga);
+                        const fa = try self.natural_gf.trans(A, ga);
                         defer fa.deinit();
-                        return .{ .inl = self.instanceF.fapply(A, B, ff, fa) };
+                        return .{ .inl = try self.instanceF.fapply(A, B, ff, fa) };
                     },
                 },
                 .inr => |gf| switch (fga) {
                     .inl => |fa| {
                         // ff is ArrayList(FnType), so we should be free it.
-                        const ff = self.natural_gf.trans(FnType, gf);
+                        const ff = try self.natural_gf.trans(FnType, gf);
                         defer ff.deinit();
-                        return .{ .inl = self.instanceF.fapply(A, B, ff, fa) };
+                        return .{ .inl = try self.instanceF.fapply(A, B, ff, fa) };
                     },
-                    .inr => |ga| .{ .inr = self.instanceG.fapply(A, B, gf, ga) },
+                    .inr => |ga| .{ .inr = try self.instanceG.fapply(A, B, gf, ga) },
                 },
             };
         }
@@ -889,26 +942,26 @@ pub fn CoproductApplicativeInst(
             // applicative function: F (a -> b), fa: F a
             fgf: anytype,
             fga: F(A),
-        ) F(B) {
+        ) AFbType(B) {
             const LamType = BaseType(@TypeOf(fgf));
             return switch (fgf) {
                 .inl => |ff| switch (fga) {
-                    .inl => |fa| .{ .inl = self.instanceF.fapplyLam(A, B, ff, fa) },
+                    .inl => |fa| .{ .inl = try self.instanceF.fapplyLam(A, B, ff, fa) },
                     .inr => |ga| {
                         // fa is ArrayList(A), so we should be free it.
-                        const fa = self.natural_gf.trans(A, ga);
+                        const fa = try self.natural_gf.trans(A, ga);
                         defer fa.deinit();
-                        return .{ .inl = self.instanceF.fapplyLam(A, B, ff, fa) };
+                        return .{ .inl = try self.instanceF.fapplyLam(A, B, ff, fa) };
                     },
                 },
                 .inr => |gf| switch (fga) {
                     .inl => |fa| {
                         // ff is ArrayList(FnType), so we should be free it.
-                        const ff = self.natural_gf.trans(LamType, gf);
+                        const ff = try self.natural_gf.trans(LamType, gf);
                         defer ff.deinit();
-                        return .{ .inl = self.instanceF.fapplyLam(A, B, ff, fa) };
+                        return .{ .inl = try self.instanceF.fapplyLam(A, B, ff, fa) };
                     },
-                    .inr => |ga| .{ .inr = self.instanceG.fapplyLam(A, B, gf, ga) },
+                    .inr => |ga| .{ .inr = try self.instanceG.fapplyLam(A, B, gf, ga) },
                 },
             };
         }
@@ -965,12 +1018,17 @@ const MaybeMonadInst = struct {
         return std.meta.Child(MaybeA);
     }
 
+    pub const Error = error{};
+
     const FaType = Functor(Self, F).FaType;
     const FbType = Functor(Self, F).FbType;
     const FaLamType = Functor(Self, F).FaLamType;
     const FbLamType = Functor(Self, F).FbLamType;
-    const SelfFaType = Functor(Self, F).SelfFaType;
-    const SelfFbType = Functor(Self, F).SelfFbType;
+
+    const APaType = Applicative(Self, F).APaType;
+    const AFbType = Applicative(Self, F).AFbType;
+
+    const MbType = Monad(Self, F).MbType;
 
     pub fn deinitFa(
         fa: anytype, // Maybe(A)
@@ -988,13 +1046,19 @@ const MaybeMonadInst = struct {
         fa: FaType(K, @TypeOf(map_fn)),
     ) FbType(@TypeOf(map_fn)) {
         _ = self;
+        const MapFn = @TypeOf(map_fn);
+        const has_err, const B = isErrorUnionOrVal(MapFnRetType(MapFn));
         if (comptime isMapRef(K)) {
             if (fa.* != null) {
-                return map_fn(&(fa.*.?));
+                const b = map_fn(&(fa.*.?));
+                const fb: ?B = if (has_err) try b else b;
+                return fb;
             }
         } else {
             if (fa) |a| {
-                return map_fn(a);
+                const b = map_fn(a);
+                const fb: ?B = if (has_err) try b else b;
+                return fb;
             }
         }
 
@@ -1008,20 +1072,26 @@ const MaybeMonadInst = struct {
         fa: FaLamType(K, @TypeOf(map_lam)),
     ) FbLamType(@TypeOf(map_lam)) {
         _ = self;
+        const MapLam = @TypeOf(map_lam);
+        const has_err, const B = isErrorUnionOrVal(MapLamRetType(MapLam));
         if (comptime isMapRef(K)) {
             if (fa.* != null) {
-                return map_lam.call(@constCast(&(fa.*.?)));
+                const b = map_lam.call(@constCast(&(fa.*.?)));
+                const fb: ?B = if (has_err) try b else b;
+                return fb;
             }
         } else {
             if (fa) |a| {
-                return map_lam.call(a);
+                const b = map_lam.call(a);
+                const fb: ?B = if (has_err) try b else b;
+                return fb;
             }
         }
 
         return null;
     }
 
-    pub fn pure(self: *Self, a: anytype) F(@TypeOf(a)) {
+    pub fn pure(self: *Self, a: anytype) APaType(@TypeOf(a)) {
         _ = self;
         return a;
     }
@@ -1033,11 +1103,14 @@ const MaybeMonadInst = struct {
         // applicative function: F (a -> b), fa: F a
         ff: F(*const fn (A) B),
         fa: F(A),
-    ) F(B) {
+    ) AFbType(B) {
         _ = self;
+        const has_err, const _B = isErrorUnionOrVal(B);
         if (ff) |f| {
             if (fa) |a| {
-                return f(a);
+                const b = f(a);
+                const fb: ?_B = if (has_err) try b else b;
+                return fb;
             }
         }
         return null;
@@ -1050,11 +1123,14 @@ const MaybeMonadInst = struct {
         // applicative function: F (a -> b), fa: F a
         flam: anytype, // a F(lambda) that present F(*const fn (A) B),
         fa: F(A),
-    ) F(B) {
+    ) AFbType(B) {
         _ = self;
+        const has_err, const _B = isErrorUnionOrVal(B);
         if (flam) |lam| {
             if (fa) |a| {
-                return lam.call(a);
+                const b = lam.call(a);
+                const fb: ?_B = if (has_err) try b else b;
+                return fb;
             }
         }
         return null;
@@ -1066,8 +1142,8 @@ const MaybeMonadInst = struct {
         comptime B: type,
         // monad function: (a -> M b), ma: M a
         ma: F(A),
-        f: *const fn (*Self, A) F(B),
-    ) F(B) {
+        f: *const fn (*Self, A) MbType(B),
+    ) MbType(B) {
         if (ma) |a| {
             return f(self, a);
         }
@@ -1080,13 +1156,13 @@ fn maybeSample() !void {
     var maybe_m = MaybeMonad.init(.{ .none = {} });
 
     var maybe_a: ?u32 = 42;
-    maybe_a = maybe_m.fmap(.InplaceMap, struct {
+    maybe_a = try maybe_m.fmap(.InplaceMap, struct {
         fn f(a: u32) u32 {
             return a + 10;
         }
     }.f, maybe_a);
 
-    const maybe_b = maybe_m.fmap(.NewValMap, struct {
+    const maybe_b = try maybe_m.fmap(.NewValMap, struct {
         fn f(a: u32) f64 {
             return @as(f64, @floatFromInt(a)) + 3.14;
         }
@@ -1098,13 +1174,13 @@ fn maybeSample() !void {
             return @intFromFloat(@floor(x));
         }
     }.f;
-    var maybe_applied = maybe_m.fapply(f64, u32, maybe_fn, maybe_b);
+    var maybe_applied = try maybe_m.fapply(f64, u32, maybe_fn, maybe_b);
     std.debug.print("maybe_applied: {any}\n", .{maybe_applied});
-    maybe_applied = maybe_m.fapply(u32, u32, null, maybe_applied);
+    maybe_applied = try maybe_m.fapply(u32, u32, null, maybe_applied);
     std.debug.print("applied with null function: {any}\n", .{maybe_applied});
 
-    const maybe_binded = maybe_m.bind(f64, u32, maybe_b, struct {
-        fn f(self: *MaybeMonadInst, x: f64) ?u32 {
+    const maybe_binded = try maybe_m.bind(f64, u32, maybe_b, struct {
+        fn f(self: *MaybeMonadInst, x: f64) MaybeMonad.MbType(u32) {
             _ = self;
             return @intFromFloat(@ceil(x * 4.0));
         }
@@ -1127,10 +1203,17 @@ const ArrayListMonadInst = struct {
         return std.meta.Child(ArrayA.Slice);
     }
 
+    pub const Error = Allocator.Error;
+
     const FaType = Functor(Self, F).FaType;
     const FbType = Functor(Self, F).FbType;
     const FaLamType = Functor(Self, F).FaLamType;
     const FbLamType = Functor(Self, F).FbLamType;
+
+    const APaType = Applicative(Self, F).APaType;
+    const AFbType = Applicative(Self, F).AFbType;
+
+    const MbType = Monad(Self, F).MbType;
 
     pub fn deinitFa(
         fa: anytype, // ArrayList(A)
@@ -1151,15 +1234,16 @@ const ArrayListMonadInst = struct {
         map_fn: anytype,
         fa: FaType(K, @TypeOf(map_fn)),
     ) FbType(@TypeOf(map_fn)) {
+        const MapFn = @TypeOf(map_fn);
         const map_lam = struct {
-            map_fn: *const fn (a: MapFnInType(K, @TypeOf(map_fn))) MapFnRetType(@TypeOf(map_fn)),
+            map_fn: *const fn (a: MapFnInType(K, MapFn)) MapFnRetType(MapFn),
 
             const MapSelf = @This();
             pub fn call(
-                mapSelf: *const MapSelf,
-                a: MapFnInType(K, @TypeOf(map_fn)),
-            ) MapFnRetType(@TypeOf(map_fn)) {
-                return mapSelf.map_fn(a);
+                map_self: *const MapSelf,
+                a: MapFnInType(K, MapFn),
+            ) MapFnRetType(MapFn) {
+                return map_self.map_fn(a);
             }
         }{ .map_fn = &map_fn };
 
@@ -1173,11 +1257,9 @@ const ArrayListMonadInst = struct {
         fa: FaLamType(K, @TypeOf(map_lam)),
     ) FbLamType(@TypeOf(map_lam)) {
         if (comptime isInplaceMap(K)) {
-            const fb = self.mapInplace(K, map_lam, fa);
-            return fb;
+            return self.mapInplace(K, map_lam, fa);
         } else {
-            const fb = self.mapNewValue(K, map_lam, fa);
-            return fb;
+            return self.mapNewValue(K, map_lam, fa);
         }
     }
 
@@ -1188,7 +1270,7 @@ const ArrayListMonadInst = struct {
         fa: FaLamType(K, @TypeOf(map_lam)),
     ) FbLamType(@TypeOf(map_lam)) {
         const A = MapLamInType(K, @TypeOf(map_lam));
-        const B = MapLamRetType(@TypeOf(map_lam));
+        const has_err, const B = comptime isErrorUnionOrVal(MapLamRetType(@TypeOf(map_lam)));
         const ValA = if (comptime isMapRef(K)) std.meta.Child(A) else A;
         if (@bitSizeOf(ValA) != @bitSizeOf(B)) {
             @compileError("The bitsize of translated value is not equal origin value, failed to map it");
@@ -1201,11 +1283,9 @@ const ArrayListMonadInst = struct {
         var slice = arr.items;
         var i: usize = 0;
         while (i < slice.len) : (i += 1) {
-            if (comptime isMapRef(K)) {
-                slice[i] = castInplaceValue(A, map_lam.call(&slice[i]));
-            } else {
-                slice[i] = castInplaceValue(A, map_lam.call(slice[i]));
-            }
+            const a = if (comptime isMapRef(K)) &slice[i] else slice[i];
+            const b = if (has_err) try map_lam.call(a) else map_lam.call(a);
+            slice[i] = castInplaceValue(A, b);
         }
         return ArrayList(B).fromOwnedSlice(self.allocator, @ptrCast(slice));
     }
@@ -1216,26 +1296,20 @@ const ArrayListMonadInst = struct {
         map_lam: anytype,
         fa: FaLamType(K, @TypeOf(map_lam)),
     ) FbLamType(@TypeOf(map_lam)) {
-        const B = MapLamRetType(@TypeOf(map_lam));
-        var fb = ArrayList(B).initCapacity(self.allocator, fa.items.len)
-        // failed to create result arraylist
-        catch @panic("ArrayListMonadInst: No memory to map new ArrayList!");
+        const has_err, const B = comptime isErrorUnionOrVal(MapLamRetType(@TypeOf(map_lam)));
+        var fb = try ArrayList(B).initCapacity(self.allocator, fa.items.len);
 
         var i: usize = 0;
         while (i < fa.items.len) : (i += 1) {
-            if (comptime isMapRef(K)) {
-                fb.appendAssumeCapacity(map_lam.call(@constCast(&fa.items[i])));
-            } else {
-                fb.appendAssumeCapacity(map_lam.call(fa.items[i]));
-            }
+            const a = if (comptime isMapRef(K)) @constCast(&fa.items[i]) else fa.items[i];
+            const b = if (has_err) try map_lam.call(a) else map_lam.call(a);
+            fb.appendAssumeCapacity(b);
         }
         return fb;
     }
 
-    pub fn pure(self: *Self, a: anytype) F(@TypeOf(a)) {
-        var arr = try ArrayList(@TypeOf(a)).initCapacity(self.allocator, ARRAY_DEFAULT_LEN)
-        // failed to create result arraylist
-        catch @panic("ArrayListMonadInst: No memory to pure a new ArrayList!");
+    pub fn pure(self: *Self, a: anytype) APaType(@TypeOf(a)) {
+        var arr = try ArrayList(@TypeOf(a)).initCapacity(self.allocator, ARRAY_DEFAULT_LEN);
 
         arr.appendAssumeCapacity(a);
         return arr;
@@ -1248,7 +1322,7 @@ const ArrayListMonadInst = struct {
         // applicative function: F (a -> b), fa: F a
         ff: F(*const fn (A) B),
         fa: F(A),
-    ) F(B) {
+    ) AFbType(B) {
         return fapplyGeneric(self, .NormalMap, A, B, ff, fa);
     }
 
@@ -1259,7 +1333,7 @@ const ArrayListMonadInst = struct {
         // applicative function: F (a -> b), fa: F a
         flam: anytype, // a F(lambda) that present F(*const fn (A) B),
         fa: F(A),
-    ) F(B) {
+    ) AFbType(B) {
         return fapplyGeneric(self, .LambdaMap, A, B, flam, fa);
     }
 
@@ -1271,19 +1345,15 @@ const ArrayListMonadInst = struct {
         // applicative function: F (a -> b), fa: F a
         ff: anytype,
         fa: F(A),
-    ) F(B) {
-        var fb = ArrayList(B)
-            .initCapacity(self.allocator, ff.items.len * fa.items.len)
-        // failed to create result arraylist
-        catch @panic("ArrayListMonadInst: No memory to create ArrayList in fapplyGeneric!");
+    ) AFbType(B) {
+        const has_err, const _B = comptime isErrorUnionOrVal(B);
+        var fb = try ArrayList(_B)
+            .initCapacity(self.allocator, ff.items.len * fa.items.len);
 
         for (ff.items) |f| {
             for (fa.items) |item| {
-                if (M == .NormalMap) {
-                    fb.appendAssumeCapacity(f(item));
-                } else {
-                    fb.appendAssumeCapacity(f.call(item));
-                }
+                const b = if (M == .NormalMap) f(item) else f.call(item);
+                fb.appendAssumeCapacity(if (has_err) try b else b);
             }
         }
         return fb;
@@ -1295,14 +1365,14 @@ const ArrayListMonadInst = struct {
         comptime B: type,
         // monad function: (a -> M b), ma: M a
         ma: F(A),
-        f: *const fn (*Self, A) F(B),
-    ) F(B) {
+        f: *const fn (*Self, A) MbType(B),
+    ) MbType(B) {
         var mb = ArrayList(B).init(self.allocator);
         for (ma.items) |a| {
-            const tmp_mb = f(self, a);
+            const tmp_mb = try f(self, a);
             defer tmp_mb.deinit();
             for (tmp_mb.items) |b| {
-                mb.append(b) catch break;
+                try mb.append(b);
             }
         }
         return mb;
@@ -1316,13 +1386,11 @@ pub const NatMaybeToArrayListInst = struct {
 
     const F = Maybe;
     const G = ArrayList;
+    const Error = Functor(ArrayListMonadInst, ArrayList).Error;
 
-    pub fn trans(self: Self, comptime A: type, fa: F(A)) G(A) {
+    pub fn trans(self: Self, comptime A: type, fa: F(A)) Error!G(A) {
         if (fa) |a| {
-            var array = ArrayList(A).initCapacity(self.instanceArray.allocator, 1)
-            // failed to create result arraylist
-            catch @panic("NatMaybeToArrayListInst: No memory to create ArrayList");
-
+            var array = try ArrayList(A).initCapacity(self.instanceArray.allocator, 1);
             array.appendAssumeCapacity(a);
             return array;
         } else {
@@ -1337,8 +1405,9 @@ pub const NatArrayListToMaybeInst = struct {
 
     const F = ArrayList;
     const G = Maybe;
+    const Error = Functor(MaybeMonadInst, Maybe).Error;
 
-    pub fn trans(self: Self, comptime A: type, fa: F(A)) G(A) {
+    pub fn trans(self: Self, comptime A: type, fa: F(A)) Error!G(A) {
         _ = self;
         if (fa.items.len > 0) {
             return fa.items[0];
@@ -1363,28 +1432,28 @@ fn arraylistSample() !void {
     }
 
     // example of functor
-    arr = array_m.fmap(.InplaceMap, struct {
+    arr = try array_m.fmap(.InplaceMap, struct {
         fn f(a: u32) u32 {
             return a + 42;
         }
     }.f, arr);
     std.debug.print("arr inplace mapped: {any}\n", .{arr.items});
 
-    const arr_f32 = array_m.fmap(.InplaceMap, struct {
+    const arr_f32 = try array_m.fmap(.InplaceMap, struct {
         fn f(a: u32) f32 {
             return @as(f32, @floatFromInt(a)) + 6.18;
         }
     }.f, arr);
     std.debug.print("arr float32 inplace mapped: {any}\n", .{arr_f32.items});
 
-    arr = array_m.fmap(.InplaceMap, struct {
+    arr = try array_m.fmap(.InplaceMap, struct {
         fn f(a: f32) u32 {
             return @as(u32, @intFromFloat(a)) + 58;
         }
     }.f, arr_f32);
     std.debug.print("arr inplace mapped again: {any}\n", .{arr.items});
 
-    const arr_new = array_m.fmap(.NewValMap, struct {
+    const arr_new = try array_m.fmap(.NewValMap, struct {
         fn f(a: u32) f64 {
             return @as(f64, @floatFromInt(a)) * 3.14;
         }
@@ -1413,13 +1482,13 @@ fn arraylistSample() !void {
         arr_fns.appendAssumeCapacity(f);
     }
 
-    const arr_applied = array_m.fapply(f64, u32, arr_fns, arr_new);
+    const arr_applied = try array_m.fapply(f64, u32, arr_fns, arr_new);
     defer arr_applied.deinit();
     std.debug.print("arr_applied: {any}\n", .{arr_applied.items});
 
     // example of monad
-    const arr_binded = array_m.bind(f64, u32, arr_new, struct {
-        fn f(inst: *@TypeOf(array_m), a: f64) ArrayList(u32) {
+    const arr_binded = try array_m.bind(f64, u32, arr_new, struct {
+        fn f(inst: *@TypeOf(array_m), a: f64) ArrayListMonad.MbType(u32) {
             var arr_b = ArrayList(u32).initCapacity(inst.allocator, 2) catch @panic("arraylistSample: No memory to create result arraylist monad!");
             arr_b.appendAssumeCapacity(@intFromFloat(@ceil(a * 4.0)));
             arr_b.appendAssumeCapacity(@intFromFloat(@ceil(a * 9.0)));
@@ -1456,14 +1525,14 @@ fn composeSample() !void {
     }
 
     // example of applicative functor
-    arr = array_maybe.fmap(.InplaceMap, struct {
+    arr = try array_maybe.fmap(.InplaceMap, struct {
         fn f(a: u32) u32 {
             return a + 42;
         }
     }.f, arr);
     std.debug.print("arr mapped: {any}\n", .{arr.items});
 
-    const arr_new = array_maybe.fmap(.NewValMap, struct {
+    const arr_new = try array_maybe.fmap(.NewValMap, struct {
         fn f(a: u32) f64 {
             return @as(f64, @floatFromInt(a)) * 3.14;
         }
@@ -1493,7 +1562,7 @@ fn composeSample() !void {
     }
     arr_fns.appendAssumeCapacity(null);
 
-    const arr_applied = array_maybe.fapply(f64, u32, arr_fns, arr_new);
+    const arr_applied = try array_maybe.fapply(f64, u32, arr_fns, arr_new);
     defer arr_applied.deinit();
     std.debug.print("arr_applied: {any}\n", .{arr_applied.items});
 
@@ -1538,25 +1607,22 @@ fn composeSample() !void {
         }.f,
     };
 
-    const int_fns_default = try ArrayList(IntToIntFn).initCapacity(allocator, 0);
-
     const intToFns = struct {
         allocator: Allocator,
         fns: []IntToIntFn,
-        fns_default: ArrayList(IntToIntFn),
 
         const FnSelf = @This();
-        fn call(self: *const FnSelf, a: u32) ArrayList(IntToIntFn) {
+        fn call(self: *const FnSelf, a: u32) Allocator.Error!ArrayList(IntToIntFn) {
             _ = a;
-            var arr1_fn = ArrayList(IntToIntFn).initCapacity(self.allocator, self.fns.len) catch self.fns_default;
+            var arr1_fn = try ArrayList(IntToIntFn).initCapacity(self.allocator, self.fns.len);
             for (self.fns) |f| {
                 arr1_fn.appendAssumeCapacity(f);
             }
             return arr1_fn;
         }
-    }{ .allocator = allocator, .fns = fn_int_array[0..2], .fns_default = int_fns_default };
+    }{ .allocator = allocator, .fns = fn_int_array[0..2] };
 
-    var arr3_fns = array_maybe.fmapLam(.NewValMap, intToFns, arr);
+    var arr3_fns = try array_maybe.fmapLam(.NewValMap, intToFns, arr);
     defer {
         for (arr3_fns.items) |item| {
             if (item) |o| {
@@ -1566,17 +1632,14 @@ fn composeSample() !void {
         arr3_fns.deinit();
     }
 
-    const int_arr_default = try ArrayList(u32).initCapacity(allocator, 0);
-
     const intToArr = struct {
         allocator: Allocator,
-        ints_default: ArrayList(u32),
 
         const FnSelf = @This();
-        fn call(self: *const FnSelf, a: u32) ArrayList(u32) {
+        fn call(self: *const FnSelf, a: u32) Allocator.Error!ArrayList(u32) {
             var tmp = a;
             var j: u32 = 0;
-            var int_arr = ArrayList(u32).initCapacity(self.allocator, 3) catch self.ints_default;
+            var int_arr = try ArrayList(u32).initCapacity(self.allocator, 3);
             while (j < 3) : ({
                 j += 1;
                 tmp += 2;
@@ -1585,9 +1648,9 @@ fn composeSample() !void {
             }
             return int_arr;
         }
-    }{ .allocator = allocator, .ints_default = int_arr_default };
+    }{ .allocator = allocator };
 
-    var arr3_ints = array_maybe.fmapLam(.NewValMap, intToArr, arr_applied);
+    var arr3_ints = try array_maybe.fmapLam(.NewValMap, intToArr, arr_applied);
     defer {
         for (arr3_ints.items) |item| {
             if (item) |o| {
@@ -1606,7 +1669,7 @@ fn composeSample() !void {
         }),
     });
 
-    const arr3_appried = array_maybe_array.fapply(u32, u32, arr3_fns, arr3_ints);
+    const arr3_appried = try array_maybe_array.fapply(u32, u32, arr3_fns, arr3_ints);
     defer {
         for (arr3_appried.items) |item| {
             if (item) |o| {
@@ -1651,7 +1714,7 @@ fn productSample() !void {
     var arr_and_maybe = ArrayAndMaybe(u32){ arr, 42 };
 
     // example of applicative functor
-    arr_and_maybe = array_and_maybe.fmap(.InplaceMap, struct {
+    arr_and_maybe = try array_and_maybe.fmap(.InplaceMap, struct {
         fn f(a: u32) u32 {
             return a + 42;
         }
@@ -1659,7 +1722,7 @@ fn productSample() !void {
     std.debug.print("arr_and_maybe mapped: ", .{});
     prettyArrayAndMaybe(arr_and_maybe);
 
-    const arr_and_maybe_new = array_and_maybe.fmap(.NewValMap, struct {
+    const arr_and_maybe_new = try array_and_maybe.fmap(.NewValMap, struct {
         fn f(a: u32) f64 {
             return @as(f64, @floatFromInt(a)) * 3.14;
         }
@@ -1690,7 +1753,7 @@ fn productSample() !void {
     }
     const arr_and_maybe_fns = ArrayAndMaybe(FloatToIntFn){ arr_fns, fn_array[0] };
 
-    const arr_and_maybe_applied = array_and_maybe.fapply(f64, u32, arr_and_maybe_fns, arr_and_maybe_new);
+    const arr_and_maybe_applied = try array_and_maybe.fapply(f64, u32, arr_and_maybe_fns, arr_and_maybe_new);
     defer arr_and_maybe_applied[0].deinit();
     std.debug.print("arr_and_maybe_applied: ", .{});
     prettyArrayAndMaybe(arr_and_maybe_applied);
@@ -1737,7 +1800,7 @@ fn coproductSample() !void {
     var arr_or_maybe = ArrayOrMaybe(u32){ .inl = arr };
 
     // example of applicative functor
-    arr_or_maybe = array_or_maybe.fmap(.InplaceMap, struct {
+    arr_or_maybe = try array_or_maybe.fmap(.InplaceMap, struct {
         fn f(a: u32) u32 {
             return a + 42;
         }
@@ -1745,7 +1808,7 @@ fn coproductSample() !void {
     std.debug.print("arr_or_maybe mapped: ", .{});
     prettyArrayOrMaybe(arr_or_maybe);
 
-    const arr_or_maybe_new = array_or_maybe.fmap(.NewValMap, struct {
+    const arr_or_maybe_new = try array_or_maybe.fmap(.NewValMap, struct {
         fn f(a: u32) f64 {
             return @as(f64, @floatFromInt(a)) * 3.14;
         }
@@ -1781,7 +1844,7 @@ fn coproductSample() !void {
     const or_array_fns = ArrayOrMaybe(FloatToIntFn){ .inl = arr_fns };
     const or_maybe_fns = ArrayOrMaybe(FloatToIntFn){ .inr = fn_array[1] };
 
-    const maybe_array_applied = array_or_maybe.fapply(f64, u32, or_maybe_fns, arr_or_maybe_new);
+    const maybe_array_applied = try array_or_maybe.fapply(f64, u32, or_maybe_fns, arr_or_maybe_new);
     defer {
         if (maybe_array_applied == .inl) {
             maybe_array_applied.inl.deinit();
@@ -1790,7 +1853,7 @@ fn coproductSample() !void {
     std.debug.print("maybe_array_applied: ", .{});
     prettyArrayOrMaybe(maybe_array_applied);
 
-    const array_array_applied = array_or_maybe.fapply(f64, u32, or_array_fns, arr_or_maybe_new);
+    const array_array_applied = try array_or_maybe.fapply(f64, u32, or_array_fns, arr_or_maybe_new);
     defer {
         if (array_array_applied == .inl) {
             array_array_applied.inl.deinit();
@@ -1800,7 +1863,7 @@ fn coproductSample() !void {
     prettyArrayOrMaybe(array_array_applied);
 
     const or_maybe_float = ArrayOrMaybe(f64){ .inr = 2.71828 };
-    const array_maybe_applied = array_or_maybe.fapply(f64, u32, or_array_fns, or_maybe_float);
+    const array_maybe_applied = try array_or_maybe.fapply(f64, u32, or_array_fns, or_maybe_float);
     defer {
         if (array_maybe_applied == .inl) {
             array_maybe_applied.inl.deinit();
@@ -1809,7 +1872,7 @@ fn coproductSample() !void {
     std.debug.print("array_maybe_applied: ", .{});
     prettyArrayOrMaybe(array_maybe_applied);
 
-    const maybe_maybe_applied = array_or_maybe.fapply(f64, u32, or_maybe_fns, or_maybe_float);
+    const maybe_maybe_applied = try array_or_maybe.fapply(f64, u32, or_maybe_fns, or_maybe_float);
     defer {
         if (maybe_maybe_applied == .inl) {
             maybe_maybe_applied.inl.deinit();
