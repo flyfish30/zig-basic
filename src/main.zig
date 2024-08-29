@@ -7,6 +7,7 @@ const sortv = @import("sort_vectors.zig");
 const sortn = @import("sorting_networks.zig");
 const vqsort = @import("vqsort.zig");
 const funalg = @import("functor_alg.zig");
+const pfunalg = @import("pure_functor_alg.zig");
 const default = @import("default.zig");
 
 const Allocator = std.mem.Allocator;
@@ -31,6 +32,7 @@ pub fn main() !void {
     try misc.baseExample();
     try sd.simdSample();
     try funalg.algSample();
+    try pfunalg.pureAlgSample();
 
     vecSortSample();
     try vqsortSample();
