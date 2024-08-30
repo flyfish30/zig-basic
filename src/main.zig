@@ -138,5 +138,14 @@ fn errorSample() Allocator.Error!void {
         return error.OutOfMemory;
     }
 
+    // If call function checkBadNumber, it will cause a
+    // error: expected type 'error{OutOfMemory}', found 'error{BadNumber}'.
+    // Because the 'error.BadNumber' not a member of error set Allocator.Error.
+    // _ = try checkBadNumber(a);
     return;
+}
+
+fn checkBadNumber(n: u32) error{BadNumber}!u32 {
+    if (n == 42) return error.BadNumber;
+    return n + 40;
 }
