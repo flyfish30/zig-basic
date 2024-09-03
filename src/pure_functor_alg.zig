@@ -279,10 +279,15 @@ pub fn NatTrans(
 /// F is instance of Applicative Functor typeclass, such as Maybe, List
 pub fn Applicative(comptime ApplicativeImpl: type) type {
     const F = ApplicativeImpl.F;
+    const has_sup_impl = @hasField(ApplicativeImpl, "functor_sup");
+
     return struct {
         const Self = @This();
-        const FunctorSup = Functor(ApplicativeImpl);
         const InstanceImpl = ApplicativeImpl;
+        const FunctorSup = if (has_sup_impl)
+            Functor(InstanceImpl.SupImpl)
+        else
+            Functor(InstanceImpl);
 
         const PureType = @TypeOf(struct {
             fn pureFn(instance: *InstanceImpl, a: anytype) F(@TypeOf(a)) {
@@ -331,7 +336,15 @@ pub fn Applicative(comptime ApplicativeImpl: type) type {
         // }
 
         pub fn init(instance: InstanceImpl) InstanceImpl {
-            const sup = FunctorSup.init(instance);
+            var inst: InstanceImpl = undefined;
+
+            if (has_sup_impl) {
+                const sup = FunctorSup.init(instance.functor_sup);
+                inst = instance;
+                inst.functor_sup = sup;
+            } else {
+                inst = FunctorSup.init(instance);
+            }
 
             if (@TypeOf(InstanceImpl.pure) != PureType) {
                 @compileError("Incorrect type of pure for Funtor instance " ++ @typeName(InstanceImpl));
@@ -342,7 +355,7 @@ pub fn Applicative(comptime ApplicativeImpl: type) type {
             if (@TypeOf(InstanceImpl.fapplyLam) != ApplyLamType) {
                 @compileError("Incorrect type of fapply lambda for Funtor instance " ++ @typeName(InstanceImpl));
             }
-            return sup;
+            return inst;
         }
     };
 }
@@ -351,10 +364,15 @@ pub fn Applicative(comptime ApplicativeImpl: type) type {
 /// M is instance of Monad typeclass, such as Maybe, List
 pub fn Monad(comptime MonadImpl: type) type {
     const M = MonadImpl.F;
+    const has_sup_impl = @hasField(MonadImpl, "applicative_sup");
+
     return struct {
         const Self = @This();
-        const ApplicativeSup = Applicative(MonadImpl);
         const InstanceImpl = MonadImpl;
+        const ApplicativeSup = if (has_sup_impl)
+            Applicative(InstanceImpl.SupImpl)
+        else
+            Applicative(InstanceImpl);
 
         const BindType = @TypeOf(struct {
             fn bindFn(
@@ -372,12 +390,20 @@ pub fn Monad(comptime MonadImpl: type) type {
         }.bindFn);
 
         pub fn init(instance: InstanceImpl) InstanceImpl {
-            const sup = ApplicativeSup.init(instance);
+            var inst: InstanceImpl = undefined;
+
+            if (has_sup_impl) {
+                const sup = ApplicativeSup.init(instance.applicative_sup);
+                inst = instance;
+                inst.applicative_sup = sup;
+            } else {
+                inst = ApplicativeSup.init(instance);
+            }
 
             if (@TypeOf(InstanceImpl.bind) != BindType) {
                 @compileError("Incorrect type of bind for Funtor instance " ++ @typeName(InstanceImpl));
             }
-            return sup;
+            return inst;
         }
     };
 }
@@ -396,10 +422,6 @@ pub fn composeFG(
 }
 
 pub fn ComposeFunctorImpl(comptime ImplF: type, comptime ImplG: type) type {
-    return ComposeApplicativeImpl(ImplF, ImplG);
-}
-
-pub fn ComposeApplicativeImpl(comptime ImplF: type, comptime ImplG: type) type {
     return struct {
         instanceF: ImplF,
         instanceG: ImplG,
@@ -480,9 +502,56 @@ pub fn ComposeApplicativeImpl(comptime ImplF: type, comptime ImplG: type) type {
 
             return self.instanceF.fmapLam(K, map_inner, fga);
         }
+    };
+}
+
+pub fn ComposeApplicativeImpl(comptime ImplF: type, comptime ImplG: type) type {
+    return struct {
+        functor_sup: SupImpl,
+
+        const Self = @This();
+        const SupImpl = ComposeFunctorImpl(ImplF, ImplG);
+
+        /// Constructor Type for Functor, Applicative, Monad, ...
+        const F = composeFG(ImplF.F, ImplG.F);
+
+        /// Get base type of F(A), it is must just is A.
+        /// In this instance, type F(A) is composed FG(A) by ImplF and
+        /// ImplG.
+        const BaseType = SupImpl.BaseType;
+
+        pub const FaType = SupImpl.FaType;
+        pub const FbType = SupImpl.FbType;
+        pub const FaLamType = SupImpl.FaLamType;
+        pub const FbLamType = SupImpl.FbLamType;
+
+        pub fn deinitFa(
+            fga: anytype, // F(G(A))
+            comptime free_fn: fn (BaseType(@TypeOf(fga))) void,
+        ) void {
+            return SupImpl.deinitFa(fga, free_fn);
+        }
+
+        pub fn fmap(
+            self: *Self,
+            comptime K: MapFnKind,
+            map_fn: anytype,
+            fga: FaType(K, @TypeOf(map_fn)),
+        ) FbType(@TypeOf(map_fn)) {
+            return self.functor_sup.fmap(K, map_fn, fga);
+        }
+
+        pub fn fmapLam(
+            self: *Self,
+            comptime K: MapFnKind,
+            map_lam: anytype,
+            fga: FaLamType(K, @TypeOf(map_lam)),
+        ) FbLamType(@TypeOf(map_lam)) {
+            return self.functor_sup.fmapLam(K, map_lam, fga);
+        }
 
         pub fn pure(self: *Self, a: anytype) F(@TypeOf(a)) {
-            return self.instanceF.pure(self.instanceG.pure(a));
+            return self.functor_sup.instanceF.pure(self.functor_sup.instanceG.pure(a));
         }
 
         pub fn fapply(
@@ -557,7 +626,7 @@ pub fn ComposeApplicativeImpl(comptime ImplF: type, comptime ImplG: type) type {
                     // apply lambda \ga -> fapply instanceG gf ga : G a -> G b
                     return apply_lam;
                 }
-            }{ .inner_instance = &self.instanceG };
+            }{ .inner_instance = &self.functor_sup.instanceG };
 
             const free_fn = struct {
                 fn free_fn(lam: @TypeOf(inner_fapply).ApplyLam) void {
@@ -565,9 +634,9 @@ pub fn ComposeApplicativeImpl(comptime ImplF: type, comptime ImplG: type) type {
                 }
             }.free_fn;
 
-            const flam = self.instanceF.fmapLam(.NewValMapRef, inner_fapply, @constCast(&fgf));
+            const flam = self.functor_sup.instanceF.fmapLam(.NewValMapRef, inner_fapply, @constCast(&fgf));
             defer ImplF.deinitFa(flam, free_fn);
-            return self.instanceF.fapplyLam(
+            return self.functor_sup.instanceF.fapplyLam(
                 ImplG.F(A),
                 ImplG.F(B),
                 flam,
@@ -616,10 +685,6 @@ pub fn getProductTypeTuple(comptime P: type) struct { type, type } {
 }
 
 pub inline fn ProductFunctorImpl(comptime ImplF: type, comptime ImplG: type) type {
-    return ProductApplicativeImpl(ImplF, ImplG);
-}
-
-pub fn ProductApplicativeImpl(comptime ImplF: type, comptime ImplG: type) type {
     return struct {
         instanceF: ImplF,
         instanceG: ImplG,
@@ -677,11 +742,58 @@ pub fn ProductApplicativeImpl(comptime ImplF: type, comptime ImplG: type) type {
                 self.instanceG.fmapLam(K, map_lam, fga[1]),
             };
         }
+    };
+}
+
+pub fn ProductApplicativeImpl(comptime ImplF: type, comptime ImplG: type) type {
+    return struct {
+        functor_sup: SupImpl,
+
+        const Self = @This();
+        const SupImpl = ProductFunctorImpl(ImplF, ImplG);
+
+        /// Constructor Type for Functor, Applicative, Monad, ...
+        const F = SupImpl.F;
+
+        /// Get base type of F(A), it is must just is A.
+        /// In this instance, type F(A) is product (F(A), G(A)) by ImplF and
+        /// ImplG.
+        const BaseType = SupImpl.BaseType;
+
+        pub const FaType = SupImpl.FaType;
+        pub const FbType = SupImpl.FbType;
+        pub const FaLamType = SupImpl.FaLamType;
+        pub const FbLamType = SupImpl.FbLamType;
+
+        pub fn deinitFa(
+            fga: anytype, // (F(A), G(A))
+            comptime free_fn: fn (BaseType(@TypeOf(fga))) void,
+        ) void {
+            SupImpl.deinitFa(fga, free_fn);
+        }
+
+        pub fn fmap(
+            self: *Self,
+            comptime K: MapFnKind,
+            map_fn: anytype,
+            fga: FaType(K, @TypeOf(map_fn)),
+        ) FbType(@TypeOf(map_fn)) {
+            return self.functor_sup.fmap(K, map_fn, fga);
+        }
+
+        pub fn fmapLam(
+            self: *Self,
+            comptime K: MapFnKind,
+            map_lam: anytype,
+            fga: FaLamType(K, @TypeOf(map_lam)),
+        ) FbLamType(@TypeOf(map_lam)) {
+            return self.functor_sup.fmapLam(K, map_lam, fga);
+        }
 
         pub fn pure(self: *Self, a: anytype) F(@TypeOf(a)) {
             return .{
-                self.instanceF.pure(a),
-                self.instanceG.pure(a),
+                self.functor_sup.instanceF.pure(a),
+                self.functor_sup.instanceG.pure(a),
             };
         }
 
@@ -694,8 +806,8 @@ pub fn ProductApplicativeImpl(comptime ImplF: type, comptime ImplG: type) type {
             fga: F(A),
         ) F(B) {
             return .{
-                self.instanceF.fapply(A, B, fgf[0], fga[0]),
-                self.instanceG.fapply(A, B, fgf[1], fga[1]),
+                self.functor_sup.instanceF.fapply(A, B, fgf[0], fga[0]),
+                self.functor_sup.instanceG.fapply(A, B, fgf[1], fga[1]),
             };
         }
 
@@ -708,8 +820,8 @@ pub fn ProductApplicativeImpl(comptime ImplF: type, comptime ImplG: type) type {
             fga: F(A),
         ) F(B) {
             return .{
-                self.instanceF.fapplyLam(A, B, fgf[0], fga[0]),
-                self.instanceG.fapplyLam(A, B, fgf[1], fga[1]),
+                self.functor_sup.instanceF.fapplyLam(A, B, fgf[0], fga[0]),
+                self.functor_sup.instanceG.fapplyLam(A, B, fgf[1], fga[1]),
             };
         }
     };
@@ -757,23 +869,11 @@ pub fn getCoproductTypeTuple(comptime U: type) struct { type, type } {
 }
 
 pub fn CoproductFunctorImpl(comptime ImplF: type, comptime ImplG: type) type {
-    return CoproductApplicativeImpl(ImplF, ImplG, void);
-}
-
-pub fn CoproductApplicativeImpl(
-    comptime ImplF: type,
-    comptime ImplG: type,
-    comptime ImplNat: type,
-) type {
     return struct {
         instanceF: ImplF,
         instanceG: ImplG,
-        /// The ImplNat type must is void for instance of Coproduct Functor
-        natural_gf: ImplNat,
 
         const Self = @This();
-        const FunctorF = Functor(ImplF);
-        const FunctorG = Functor(ImplG);
 
         /// Constructor Type for Functor, Applicative, Monad, ...
         const F = coproductFG(ImplF.F, ImplG.F);
@@ -824,9 +924,62 @@ pub fn CoproductApplicativeImpl(
                 .inr => |ga| .{ .inr = self.instanceG.fmapLam(K, map_lam, ga) },
             };
         }
+    };
+}
+
+pub fn CoproductApplicativeImpl(
+    comptime ImplF: type,
+    comptime ImplG: type,
+    comptime ImplNat: type,
+) type {
+    return struct {
+        functor_sup: SupImpl,
+        /// The ImplNat type must is void for instance of Coproduct Functor
+        natural_gf: ImplNat,
+
+        const Self = @This();
+        const SupImpl = CoproductFunctorImpl(ImplF, ImplG);
+
+        /// Constructor Type for Functor, Applicative, Monad, ...
+        const F = SupImpl.F;
+
+        /// Get base type of F(A), it is must just is A.
+        /// In this instance, type F(A) is product (F(A), G(A)) by ImplF and
+        /// ImplG.
+        const BaseType = SupImpl.BaseType;
+
+        pub const FaType = SupImpl.FaType;
+        pub const FbType = SupImpl.FbType;
+        pub const FaLamType = SupImpl.FaLamType;
+        pub const FbLamType = SupImpl.FbLamType;
+
+        pub fn deinitFa(
+            fga: anytype, // (F(A), G(A))
+            comptime free_fn: fn (BaseType(@TypeOf(fga))) void,
+        ) void {
+            SupImpl.deinitFa(fga, free_fn);
+        }
+
+        pub fn fmap(
+            self: *Self,
+            comptime K: MapFnKind,
+            map_fn: anytype,
+            fga: FaType(K, @TypeOf(map_fn)),
+        ) FbType(@TypeOf(map_fn)) {
+            return self.functor_sup.fmap(K, map_fn, fga);
+        }
+
+        pub fn fmapLam(
+            self: *Self,
+            comptime K: MapFnKind,
+            map_lam: anytype,
+            fga: FaLamType(K, @TypeOf(map_lam)),
+        ) FbLamType(@TypeOf(map_lam)) {
+            return self.functor_sup.fmapLam(K, map_lam, fga);
+        }
 
         pub fn pure(self: *Self, a: anytype) F(@TypeOf(a)) {
-            return .{ .inr = self.instanceG.pure(a) };
+            return .{ .inr = self.functor_sup.instanceG.pure(a) };
         }
 
         pub fn fapply(
@@ -840,18 +993,18 @@ pub fn CoproductApplicativeImpl(
             const FnType = BaseType(@TypeOf(fgf));
             return switch (fgf) {
                 .inl => |ff| switch (fga) {
-                    .inl => |fa| .{ .inl = self.instanceF.fapply(A, B, ff, fa) },
+                    .inl => |fa| .{ .inl = self.functor_sup.instanceF.fapply(A, B, ff, fa) },
                     .inr => |ga| {
                         const fa = self.natural_gf.trans(A, ga);
-                        return .{ .inl = self.instanceF.fapply(A, B, ff, fa) };
+                        return .{ .inl = self.functor_sup.instanceF.fapply(A, B, ff, fa) };
                     },
                 },
                 .inr => |gf| switch (fga) {
                     .inl => |fa| {
                         const ff = self.natural_gf.trans(FnType, gf);
-                        return .{ .inl = self.instanceF.fapply(A, B, ff, fa) };
+                        return .{ .inl = self.functor_sup.instanceF.fapply(A, B, ff, fa) };
                     },
-                    .inr => |ga| .{ .inr = self.instanceG.fapply(A, B, gf, ga) },
+                    .inr => |ga| .{ .inr = self.functor_sup.instanceG.fapply(A, B, gf, ga) },
                 },
             };
         }
@@ -867,18 +1020,18 @@ pub fn CoproductApplicativeImpl(
             const LamType = BaseType(@TypeOf(fgf));
             return switch (fgf) {
                 .inl => |ff| switch (fga) {
-                    .inl => |fa| .{ .inl = self.instanceF.fapplyLam(A, B, ff, fa) },
+                    .inl => |fa| .{ .inl = self.functor_sup.instanceF.fapplyLam(A, B, ff, fa) },
                     .inr => |ga| {
                         const fa = self.natural_gf.trans(A, ga);
-                        return .{ .inl = self.instanceF.fapplyLam(A, B, ff, fa) };
+                        return .{ .inl = self.functor_sup.instanceF.fapplyLam(A, B, ff, fa) };
                     },
                 },
                 .inr => |gf| switch (fga) {
                     .inl => |fa| {
                         const ff = self.natural_gf.trans(LamType, gf);
-                        return .{ .inl = self.instanceF.fapplyLam(A, B, ff, fa) };
+                        return .{ .inl = self.functor_sup.instanceF.fapplyLam(A, B, ff, fa) };
                     },
-                    .inr => |ga| .{ .inr = self.instanceG.fapplyLam(A, B, gf, ga) },
+                    .inr => |ga| .{ .inr = self.functor_sup.instanceG.fapplyLam(A, B, gf, ga) },
                 },
             };
         }
@@ -1484,10 +1637,10 @@ fn composeSample() !void {
     const MaybeApplicative = Applicative(MaybeMonadImpl);
     const ArrayMaybeApplicative = ComposeApplicative(ArrayApplicative, MaybeApplicative);
 
-    var array_maybe = ArrayMaybeApplicative.init(.{
+    var array_maybe = ArrayMaybeApplicative.init(.{ .functor_sup = .{
         .instanceF = .{ .none = {} },
         .instanceG = .{ .none = {} },
-    });
+    } });
 
     var arr: ArrayF(Maybe(u32)) = undefined;
     var i: u32 = 0;
@@ -1622,12 +1775,12 @@ fn composeSample() !void {
     // std.debug.print("arr3_ints: {any}\n", .{arr3_ints});
 
     const ArrayMaybeArrayApplicative = ComposeApplicative(ArrayMaybeApplicative, ArrayApplicative);
-    var array_maybe_array = ArrayMaybeArrayApplicative.init(.{
+    var array_maybe_array = ArrayMaybeArrayApplicative.init(.{ .functor_sup = .{
         .instanceF = array_maybe,
         .instanceG = ArrayApplicative.init(.{
             .none = {},
         }),
-    });
+    } });
 
     const arr3_appried = array_maybe_array.fapply(u32, u32, arr3_fns, arr3_ints);
     std.debug.print("arr3_appried: ", .{});
@@ -1642,10 +1795,10 @@ fn productSample() !void {
     const MaybeApplicative = Applicative(MaybeMonadImpl);
     const ArrayAndMaybeApplicative = ProductApplicative(ArrayApplicative, MaybeApplicative);
 
-    var array_and_maybe = ArrayAndMaybeApplicative.init(.{
+    var array_and_maybe = ArrayAndMaybeApplicative.init(.{ .functor_sup = .{
         .instanceF = .{ .none = {} },
         .instanceG = .{ .none = {} },
-    });
+    } });
 
     // pretty print the array maybe tuple with type { ArrayF(A), Maybe(A) }
     const prettyArrayAndMaybe = struct {
@@ -1719,10 +1872,12 @@ fn coproductSample() !void {
     const ArrayOrMaybeApplicative = CoproductApplicative(ArrayApplicative, MaybeApplicative, NatMaybeToArray);
 
     var array_or_maybe = ArrayOrMaybeApplicative.init(.{
-        // Array Applicative instance
-        .instanceF = .{ .none = {} },
-        // Maybe Applicative instance
-        .instanceG = .{ .none = {} },
+        .functor_sup = .{
+            // Array Applicative instance
+            .instanceF = .{ .none = {} },
+            // Maybe Applicative instance
+            .instanceG = .{ .none = {} },
+        },
         // NatMaybeToArray Applicative instance
         .natural_gf = .{ .instanceArray = .{ .none = {} } },
     });
