@@ -13,6 +13,9 @@ pub fn algSample() !void {
     try coproductSample();
 }
 
+/// A single-argument type function for type constructor
+pub const TCtor = fn (comptime type) type;
+
 fn MapFnInType(comptime K: MapFnKind, comptime MapFn: type) type {
     const len = @typeInfo(MapFn).Fn.params.len;
 
@@ -132,7 +135,7 @@ pub fn isErrorUnionOrVal(comptime E: type) struct { bool, type } {
 
 // fn FMapType(
 //     // F is instance of Functor typeclass, such as Maybe, List
-//     comptime F: fn (comptime T: type) type,
+//     comptime F: TCtor,
 //     map_fn: anytype
 // ) type {
 //     const T = MapFnInType(@TypeOf(map_fn));
@@ -143,7 +146,7 @@ pub fn isErrorUnionOrVal(comptime E: type) struct { bool, type } {
 /// FMapFn create a struct type that will to run map function
 // FMapFn: *const fn (comptime K: MapFnKind, comptime MapFnT: type) type,
 
-pub fn FunctorFxTypes(comptime F: fn (comptime T: type) type, comptime E: type) type {
+pub fn FunctorFxTypes(comptime F: TCtor, comptime E: type) type {
     return struct {
         fn FaType(comptime K: MapFnKind, comptime MapFn: type) type {
             if (comptime isMapRef(K)) {
@@ -255,10 +258,7 @@ pub fn Functor(comptime FunctorImpl: type) type {
     };
 }
 
-pub fn NatTransType(
-    comptime F: fn (comptime T: type) type,
-    comptime G: fn (comptime T: type) type,
-) type {
+pub fn NatTransType(comptime F: TCtor, comptime G: TCtor) type {
     return @TypeOf(struct {
         fn transFn(comptime A: type, fa: F(A)) G(A) {
             _ = fa;
@@ -307,7 +307,7 @@ pub fn NatTrans(
     };
 }
 
-pub fn ApplicativeFxTypes(comptime F: fn (comptime T: type) type, comptime E: type) type {
+pub fn ApplicativeFxTypes(comptime F: TCtor, comptime E: type) type {
     return struct {
         /// return type of pure a
         fn APaType(comptime A: type) type {
@@ -417,7 +417,7 @@ pub fn Applicative(comptime ApplicativeImpl: type) type {
     };
 }
 
-pub fn MonadFxTypes(comptime F: fn (comptime T: type) type, comptime E: type) type {
+pub fn MonadFxTypes(comptime F: TCtor, comptime E: type) type {
     return struct {
         /// return type of bind
         fn MbType(comptime B: type) type {
@@ -479,10 +479,7 @@ pub fn Monad(comptime MonadImpl: type) type {
 
 /// Compose two Type constructor to one Type constructor, the parameter
 /// F and G are one parameter Type consturctor.
-pub fn composeFG(
-    comptime F: fn (comptime type) type,
-    comptime G: fn (comptime type) type,
-) fn (comptime type) type {
+pub fn composeFG(comptime F: TCtor, comptime G: TCtor) TCtor {
     return struct {
         fn Composed(comptime A: type) type {
             return F(G(A));
@@ -743,10 +740,7 @@ pub fn ComposeApplicative(comptime ApplicativeF: type, comptime ApplicativeG: ty
 
 /// Get a Product Type constructor from two Type constructor, the parameter
 /// F and G are one parameter Type consturctor.
-pub fn productFG(
-    comptime F: fn (comptime type) type,
-    comptime G: fn (comptime type) type,
-) fn (comptime type) type {
+pub fn productFG(comptime F: TCtor, comptime G: TCtor) TCtor {
     return struct {
         fn Producted(comptime A: type) type {
             return struct { F(A), G(A) };
@@ -934,10 +928,7 @@ pub fn ProductApplicative(comptime ApplicativeF: type, comptime ApplicativeG: ty
 
 /// Get a Coproduct Type constructor from two Type constructor, the parameter
 /// F and G are one parameter Type consturctor.
-pub fn coproductFG(
-    comptime F: fn (comptime type) type,
-    comptime G: fn (comptime type) type,
-) fn (comptime type) type {
+pub fn coproductFG(comptime F: TCtor, comptime G: TCtor) TCtor {
     return struct {
         fn Coproducted(comptime A: type) type {
             return union(enum) {
