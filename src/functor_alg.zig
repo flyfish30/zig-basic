@@ -16,20 +16,14 @@ pub fn algSample() !void {
 /// A single-argument type function for type constructor
 pub const TCtor = fn (comptime type) type;
 
-fn MapFnInType(comptime K: MapFnKind, comptime MapFn: type) type {
+fn MapFnInType(comptime MapFn: type) type {
     const len = @typeInfo(MapFn).Fn.params.len;
 
     if (len != 1) {
         @compileError("The map function must has only one parameter!");
     }
 
-    const InType = @typeInfo(MapFn).Fn.params[0].type.?;
-    if (comptime isMapRef(K)) {
-        comptime assert(@typeInfo(InType) == .Pointer);
-        return std.meta.Child(InType);
-    } else {
-        return InType;
-    }
+    return @typeInfo(MapFn).Fn.params[0].type.?;
 }
 
 fn MapFnRetType(comptime MapFn: type) type {
@@ -41,7 +35,7 @@ fn MapFnRetType(comptime MapFn: type) type {
     return R;
 }
 
-fn MapLamInType(comptime K: MapFnKind, comptime MapLam: type) type {
+fn MapLamInType(comptime MapLam: type) type {
     const info = @typeInfo(MapLam);
     if (info != .Struct) {
         @compileError("The map lambda must be a struct!");
@@ -57,13 +51,7 @@ fn MapLamInType(comptime K: MapFnKind, comptime MapLam: type) type {
         @compileError("The first parameter of call function must be a pointer of MapLam!");
     }
 
-    const InType = mapFnInfo.Fn.params[1].type.?;
-    if (comptime isMapRef(K)) {
-        comptime assert(@typeInfo(InType) == .Pointer);
-        return std.meta.Child(InType);
-    } else {
-        return InType;
-    }
+    return mapFnInfo.Fn.params[1].type.?;
 }
 
 fn MapLamRetType(comptime MapLam: type) type {
@@ -151,9 +139,9 @@ pub fn FunctorFxTypes(comptime F: TCtor, comptime E: type) type {
         fn FaType(comptime K: MapFnKind, comptime MapFn: type) type {
             if (comptime isMapRef(K)) {
                 // The fa paramerter of fmap function is also a reference.
-                return *F(MapFnInType(K, MapFn));
+                return *F(std.meta.Child(MapFnInType(MapFn)));
             } else {
-                return F(MapFnInType(K, MapFn));
+                return F(MapFnInType(MapFn));
             }
         }
 
@@ -169,9 +157,9 @@ pub fn FunctorFxTypes(comptime F: TCtor, comptime E: type) type {
         fn FaLamType(comptime K: MapFnKind, comptime MapLam: type) type {
             if (comptime isMapRef(K)) {
                 // The fa paramerter of fmapLam function is also a reference.
-                return *F(MapLamInType(K, MapLam));
+                return *F(std.meta.Child(MapLamInType(MapLam)));
             } else {
-                return F(MapLamInType(K, MapLam));
+                return F(MapLamInType(MapLam));
             }
         }
 
@@ -248,10 +236,10 @@ pub fn Functor(comptime FunctorImpl: type) type {
 
         pub fn init(instance: InstanceImpl) InstanceImpl {
             if (@TypeOf(InstanceImpl.fmap) != FMapType) {
-                @compileError("Incorrect type of fmap for Funtor instance " ++ @typeName(InstanceImpl));
+                @compileError("Incorrect type of fmap for Functor instance " ++ @typeName(InstanceImpl));
             }
             if (@TypeOf(InstanceImpl.fmapLam) != FMapLamType) {
-                @compileError("Incorrect type of fmapLam for Funtor instance " ++ @typeName(InstanceImpl));
+                @compileError("Incorrect type of fmapLam for Functor instance " ++ @typeName(InstanceImpl));
             }
             return instance;
         }
@@ -272,11 +260,11 @@ pub fn NatTrans(
     comptime NatTransImpl: type,
 ) type {
     if (!(@hasDecl(NatTransImpl, "F") and @hasDecl(NatTransImpl, "G"))) {
-        @compileError("The natural transformation instance must has F and G type!");
+        @compileError("The NatTrans instance must has F and G type!");
     }
 
     if (!(@hasDecl(NatTransImpl, "Error"))) {
-        @compileError("The natural transformation instance must has Error type!");
+        @compileError("The NatTrans instance must has Error type!");
     }
 
     const F = NatTransImpl.F;
@@ -300,7 +288,7 @@ pub fn NatTrans(
 
         pub fn init(instance: InstanceImpl) InstanceImpl {
             if (@TypeOf(InstanceImpl.trans) != FTransType) {
-                @compileError("Incorrect type of fmap for Funtor instance " ++ @typeName(InstanceImpl));
+                @compileError("Incorrect type of fmap for NatTrans instance " ++ @typeName(InstanceImpl));
             }
             return instance;
         }
@@ -404,13 +392,13 @@ pub fn Applicative(comptime ApplicativeImpl: type) type {
             }
 
             if (@TypeOf(InstanceImpl.pure) != PureType) {
-                @compileError("Incorrect type of pure for Funtor instance " ++ @typeName(InstanceImpl));
+                @compileError("Incorrect type of pure for Applicative instance " ++ @typeName(InstanceImpl));
             }
             if (@TypeOf(InstanceImpl.fapply) != ApplyType) {
-                @compileError("Incorrect type of fapply for Funtor instance " ++ @typeName(InstanceImpl));
+                @compileError("Incorrect type of fapply for Applicative instance " ++ @typeName(InstanceImpl));
             }
             if (@TypeOf(InstanceImpl.fapplyLam) != ApplyLamType) {
-                @compileError("Incorrect type of fapply lambda for Funtor instance " ++ @typeName(InstanceImpl));
+                @compileError("Incorrect type of fapply lambda for Applicative instance " ++ @typeName(InstanceImpl));
             }
             return inst;
         }
@@ -470,7 +458,7 @@ pub fn Monad(comptime MonadImpl: type) type {
             }
 
             if (@TypeOf(InstanceImpl.bind) != BindType) {
-                @compileError("Incorrect type of bind for Funtor instance " ++ @typeName(InstanceImpl));
+                @compileError("Incorrect type of bind for Monad instance " ++ @typeName(InstanceImpl));
             }
             return inst;
         }
@@ -536,10 +524,10 @@ pub fn ComposeFunctorImpl(comptime ImplF: type, comptime ImplG: type) type {
         ) FbType(@TypeOf(map_fn)) {
             const MapFn = @TypeOf(map_fn);
             const map_lam = struct {
-                map_fn: *const fn (a: MapFnInType(K, MapFn)) MapFnRetType(MapFn),
+                map_fn: *const fn (a: MapFnInType(MapFn)) MapFnRetType(MapFn),
 
                 const MapSelf = @This();
-                pub fn call(map_self: *const MapSelf, a: MapFnInType(K, MapFn)) MapFnRetType(MapFn) {
+                pub fn call(map_self: *const MapSelf, a: MapFnInType(MapFn)) MapFnRetType(MapFn) {
                     return map_self.map_fn(a);
                 }
             }{ .map_fn = &map_fn };
@@ -1408,12 +1396,12 @@ const ArrayListMonadImpl = struct {
     ) FbType(@TypeOf(map_fn)) {
         const MapFn = @TypeOf(map_fn);
         const map_lam = struct {
-            map_fn: *const fn (a: MapFnInType(K, MapFn)) MapFnRetType(MapFn),
+            map_fn: *const fn (a: MapFnInType(MapFn)) MapFnRetType(MapFn),
 
             const MapSelf = @This();
             pub fn call(
                 map_self: *const MapSelf,
-                a: MapFnInType(K, MapFn),
+                a: MapFnInType(MapFn),
             ) MapFnRetType(MapFn) {
                 return map_self.map_fn(a);
             }
@@ -1441,7 +1429,7 @@ const ArrayListMonadImpl = struct {
         map_lam: anytype,
         fa: FaLamType(K, @TypeOf(map_lam)),
     ) FbLamType(@TypeOf(map_lam)) {
-        const A = MapLamInType(K, @TypeOf(map_lam));
+        const A = MapLamInType(@TypeOf(map_lam));
         const has_err, const B = comptime isErrorUnionOrVal(MapLamRetType(@TypeOf(map_lam)));
         const ValA = if (comptime isMapRef(K)) std.meta.Child(A) else A;
         if (@bitSizeOf(ValA) != @bitSizeOf(B)) {
