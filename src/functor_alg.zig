@@ -414,7 +414,7 @@ pub fn MonadFxTypes(comptime F: TCtor, comptime E: type) type {
     };
 }
 
-/// Monad Functor typeclass like in Haskell, it inherit from Applicative Functor.
+/// Monad typeclass like in Haskell, it inherit from Applicative Functor.
 /// M is instance of Monad typeclass, such as Maybe, List
 pub fn Monad(comptime MonadImpl: type) type {
     const M = MonadImpl.F;
@@ -1180,15 +1180,17 @@ const MaybeMonadImpl = struct {
 
     pub const Error = error{};
 
-    const FaType = Functor(Self).FaType;
-    const FbType = Functor(Self).FbType;
-    const FaLamType = Functor(Self).FaLamType;
-    const FbLamType = Functor(Self).FbLamType;
+    pub const FxTypes = FunctorFxTypes(F, Error);
+    pub const FaType = FxTypes.FaType;
+    pub const FbType = FxTypes.FbType;
+    pub const FaLamType = FxTypes.FaLamType;
+    pub const FbLamType = FxTypes.FbLamType;
 
-    const APaType = Applicative(Self).APaType;
-    const AFbType = Applicative(Self).AFbType;
+    const AFxTypes = ApplicativeFxTypes(F, Error);
+    pub const APaType = AFxTypes.APaType;
+    pub const AFbType = AFxTypes.AFbType;
 
-    const MbType = Monad(Self).MbType;
+    pub const MbType = MonadFxTypes(F, Error).MbType;
 
     pub fn deinitFa(
         fa: anytype, // Maybe(A)
@@ -1365,15 +1367,17 @@ const ArrayListMonadImpl = struct {
 
     pub const Error = Allocator.Error;
 
-    const FaType = Functor(Self).FaType;
-    const FbType = Functor(Self).FbType;
-    const FaLamType = Functor(Self).FaLamType;
-    const FbLamType = Functor(Self).FbLamType;
+    pub const FxTypes = FunctorFxTypes(F, Error);
+    pub const FaType = FxTypes.FaType;
+    pub const FbType = FxTypes.FbType;
+    pub const FaLamType = FxTypes.FaLamType;
+    pub const FbLamType = FxTypes.FbLamType;
 
-    const APaType = Applicative(Self).APaType;
-    const AFbType = Applicative(Self).AFbType;
+    const AFxTypes = ApplicativeFxTypes(F, Error);
+    pub const APaType = AFxTypes.APaType;
+    pub const AFbType = AFxTypes.AFbType;
 
-    const MbType = Monad(Self).MbType;
+    pub const MbType = MonadFxTypes(F, Error).MbType;
 
     pub fn deinitFa(
         fa: anytype, // ArrayList(A)

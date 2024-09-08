@@ -333,7 +333,7 @@ pub fn Applicative(comptime ApplicativeImpl: type) type {
     };
 }
 
-/// Monad Functor typeclass like in Haskell, it inherit from Applicative Functor.
+/// Monad typeclass like in Haskell, it inherit from Applicative Functor.
 /// M is instance of Monad typeclass, such as Maybe, List
 pub fn Monad(comptime MonadImpl: type) type {
     const M = MonadImpl.F;
@@ -574,6 +574,8 @@ pub fn ComposeApplicativeImpl(comptime ImplF: type, comptime ImplG: type) type {
 /// Compose two Functor to one Functor, the parameter FunctorF and FunctorG
 /// are Functor type.
 pub fn ComposeFunctor(comptime FunctorF: type, comptime FunctorG: type) type {
+    FunctorF.init();
+    FunctorG.init();
     const ImplFG = ComposeFunctorImpl(FunctorF.InstanceImpl, FunctorG.InstanceImpl);
     return Functor(ImplFG);
 }
@@ -581,6 +583,8 @@ pub fn ComposeFunctor(comptime FunctorF: type, comptime FunctorG: type) type {
 /// Compose two Applicative Functor to one Applicative Functor, the parameter
 /// ApplicativeF and ApplicativeG are Applicative Functor type.
 pub fn ComposeApplicative(comptime ApplicativeF: type, comptime ApplicativeG: type) type {
+    ApplicativeF.init();
+    ApplicativeG.init();
     const ImplFG = ComposeApplicativeImpl(ApplicativeF.InstanceImpl, ApplicativeG.InstanceImpl);
     return Applicative(ImplFG);
 }
@@ -720,6 +724,8 @@ pub fn ProductApplicativeImpl(comptime ImplF: type, comptime ImplG: type) type {
 /// Get a Product Functor from two Functor, the parameter FunctorF and FunctorG
 /// are Functor type.
 pub fn ProductFunctor(comptime FunctorF: type, comptime FunctorG: type) type {
+    FunctorF.init();
+    FunctorG.init();
     const ImplFG = ProductFunctorImpl(FunctorF.InstanceImpl, FunctorG.InstanceImpl);
     return Functor(ImplFG);
 }
@@ -727,6 +733,8 @@ pub fn ProductFunctor(comptime FunctorF: type, comptime FunctorG: type) type {
 /// Get a Product Applicative from two Applicative, the parameter
 /// ApplicativeF and ApplicativeG are Applicative Functor type.
 pub fn ProductApplicative(comptime ApplicativeF: type, comptime ApplicativeG: type) type {
+    ApplicativeF.init();
+    ApplicativeG.init();
     const ImplFG = ProductApplicativeImpl(ApplicativeF.InstanceImpl, ApplicativeG.InstanceImpl);
     return Applicative(ImplFG);
 }
@@ -893,6 +901,8 @@ pub fn CoproductApplicativeImpl(
 /// Get a Coproduct Functor from two Functor, the parameter FunctorF and FunctorG
 /// are Functor type.
 pub fn CoproductFunctor(comptime FunctorF: type, comptime FunctorG: type) type {
+    FunctorF.init();
+    FunctorG.init();
     const ImplFG = CoproductFunctorImpl(FunctorF.InstanceImpl, FunctorG.InstanceImpl);
     return Functor(ImplFG);
 }
@@ -904,6 +914,10 @@ pub fn CoproductApplicative(
     comptime ApplicativeG: type,
     comptime NaturalGF: type,
 ) type {
+    ApplicativeF.init();
+    ApplicativeF.init();
+    NaturalGF.init();
+
     const ImplFG = CoproductApplicativeImpl(
         ApplicativeF.InstanceImpl,
         ApplicativeG.InstanceImpl,
@@ -940,10 +954,11 @@ const MaybeMonadImpl = struct {
         return std.meta.Child(MaybeA);
     }
 
-    const FaType = Functor(Self).FaType;
-    const FbType = Functor(Self).FbType;
-    const FaLamType = Functor(Self).FaLamType;
-    const FbLamType = Functor(Self).FbLamType;
+    pub const FxTypes = FunctorFxTypes(F);
+    pub const FaType = FxTypes.FaType;
+    pub const FbType = FxTypes.FbType;
+    pub const FaLamType = FxTypes.FaLamType;
+    pub const FbLamType = FxTypes.FbLamType;
 
     pub fn deinitFa(
         fa: anytype, // Maybe(A)
@@ -1094,10 +1109,11 @@ pub fn ArrayMonadImpl(comptime len: usize) type {
             return std.meta.Child(ArrayA);
         }
 
-        const FaType = Functor(Self).FaType;
-        const FbType = Functor(Self).FbType;
-        const FaLamType = Functor(Self).FaLamType;
-        const FbLamType = Functor(Self).FbLamType;
+        pub const FxTypes = FunctorFxTypes(F);
+        pub const FaType = FxTypes.FaType;
+        pub const FbType = FxTypes.FbType;
+        pub const FaLamType = FxTypes.FaLamType;
+        pub const FbLamType = FxTypes.FbLamType;
 
         fn FaFnOrLamType(
             comptime K: MapFnKind,
