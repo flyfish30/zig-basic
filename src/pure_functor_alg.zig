@@ -173,7 +173,7 @@ pub fn Functor(comptime FunctorImpl: type) type {
     }
 
     const F = FunctorImpl.F;
-    return struct {
+    const InstanceType = struct {
         const InstanceImpl = FunctorImpl;
 
         pub const FxTypes = FunctorFxTypes(F);
@@ -218,6 +218,9 @@ pub fn Functor(comptime FunctorImpl: type) type {
         pub const fmap = InstanceImpl.fmap;
         pub const fmapLam = InstanceImpl.fmapLam;
     };
+
+    InstanceType.init();
+    return InstanceType;
 }
 
 pub fn NatTransType(comptime F: TCtor, comptime G: TCtor) type {
@@ -240,7 +243,7 @@ pub fn NatTrans(
     const F = NatTransImpl.F;
     const G = NatTransImpl.G;
 
-    return struct {
+    const InstanceType = struct {
         const InstanceImpl = NatTransImpl;
 
         const FTransType = @TypeOf(struct {
@@ -257,6 +260,9 @@ pub fn NatTrans(
 
         pub const trans = InstanceImpl.trans;
     };
+
+    InstanceType.init();
+    return InstanceType;
 }
 
 /// Applicative Functor typeclass like in Haskell, it inherit from Functor.
@@ -265,7 +271,7 @@ pub fn Applicative(comptime ApplicativeImpl: type) type {
     const F = ApplicativeImpl.F;
     const has_sup_impl = @hasField(ApplicativeImpl, "SupImpl");
 
-    return struct {
+    const InstanceType = struct {
         const InstanceImpl = ApplicativeImpl;
         const FunctorSup = if (has_sup_impl)
             Functor(InstanceImpl.SupImpl)
@@ -312,8 +318,6 @@ pub fn Applicative(comptime ApplicativeImpl: type) type {
         // }
 
         pub fn init() void {
-            FunctorSup.init();
-
             if (@TypeOf(InstanceImpl.pure) != PureType) {
                 @compileError("Incorrect type of pure for Applicative instance " ++ @typeName(InstanceImpl));
             }
@@ -331,6 +335,9 @@ pub fn Applicative(comptime ApplicativeImpl: type) type {
         pub const fapply = InstanceImpl.fapply;
         pub const fapplyLam = InstanceImpl.fapplyLam;
     };
+
+    InstanceType.init();
+    return InstanceType;
 }
 
 /// Monad typeclass like in Haskell, it inherit from Applicative Functor.
@@ -339,7 +346,7 @@ pub fn Monad(comptime MonadImpl: type) type {
     const M = MonadImpl.F;
     const has_sup_impl = @hasField(MonadImpl, "SupImpl");
 
-    return struct {
+    const InstanceType = struct {
         const InstanceImpl = MonadImpl;
         const ApplicativeSup = if (has_sup_impl)
             Applicative(InstanceImpl.SupImpl)
@@ -360,8 +367,6 @@ pub fn Monad(comptime MonadImpl: type) type {
         }.bindFn);
 
         pub fn init() void {
-            ApplicativeSup.init();
-
             if (@TypeOf(InstanceImpl.bind) != BindType) {
                 @compileError("Incorrect type of bind for Monad instance " ++ @typeName(InstanceImpl));
             }
@@ -374,6 +379,9 @@ pub fn Monad(comptime MonadImpl: type) type {
         pub const fapplyLam = ApplicativeSup.fapplyLam;
         pub const bind = InstanceImpl.bind;
     };
+
+    InstanceType.init();
+    return InstanceType;
 }
 
 /// Compose two Type constructor to one Type constructor, the parameter
@@ -574,8 +582,6 @@ pub fn ComposeApplicativeImpl(comptime ImplF: type, comptime ImplG: type) type {
 /// Compose two Functor to one Functor, the parameter FunctorF and FunctorG
 /// are Functor type.
 pub fn ComposeFunctor(comptime FunctorF: type, comptime FunctorG: type) type {
-    FunctorF.init();
-    FunctorG.init();
     const ImplFG = ComposeFunctorImpl(FunctorF.InstanceImpl, FunctorG.InstanceImpl);
     return Functor(ImplFG);
 }
@@ -583,8 +589,6 @@ pub fn ComposeFunctor(comptime FunctorF: type, comptime FunctorG: type) type {
 /// Compose two Applicative Functor to one Applicative Functor, the parameter
 /// ApplicativeF and ApplicativeG are Applicative Functor type.
 pub fn ComposeApplicative(comptime ApplicativeF: type, comptime ApplicativeG: type) type {
-    ApplicativeF.init();
-    ApplicativeG.init();
     const ImplFG = ComposeApplicativeImpl(ApplicativeF.InstanceImpl, ApplicativeG.InstanceImpl);
     return Applicative(ImplFG);
 }
@@ -724,8 +728,6 @@ pub fn ProductApplicativeImpl(comptime ImplF: type, comptime ImplG: type) type {
 /// Get a Product Functor from two Functor, the parameter FunctorF and FunctorG
 /// are Functor type.
 pub fn ProductFunctor(comptime FunctorF: type, comptime FunctorG: type) type {
-    FunctorF.init();
-    FunctorG.init();
     const ImplFG = ProductFunctorImpl(FunctorF.InstanceImpl, FunctorG.InstanceImpl);
     return Functor(ImplFG);
 }
@@ -733,8 +735,6 @@ pub fn ProductFunctor(comptime FunctorF: type, comptime FunctorG: type) type {
 /// Get a Product Applicative from two Applicative, the parameter
 /// ApplicativeF and ApplicativeG are Applicative Functor type.
 pub fn ProductApplicative(comptime ApplicativeF: type, comptime ApplicativeG: type) type {
-    ApplicativeF.init();
-    ApplicativeG.init();
     const ImplFG = ProductApplicativeImpl(ApplicativeF.InstanceImpl, ApplicativeG.InstanceImpl);
     return Applicative(ImplFG);
 }
@@ -901,8 +901,6 @@ pub fn CoproductApplicativeImpl(
 /// Get a Coproduct Functor from two Functor, the parameter FunctorF and FunctorG
 /// are Functor type.
 pub fn CoproductFunctor(comptime FunctorF: type, comptime FunctorG: type) type {
-    FunctorF.init();
-    FunctorG.init();
     const ImplFG = CoproductFunctorImpl(FunctorF.InstanceImpl, FunctorG.InstanceImpl);
     return Functor(ImplFG);
 }
@@ -914,10 +912,6 @@ pub fn CoproductApplicative(
     comptime ApplicativeG: type,
     comptime NaturalGF: type,
 ) type {
-    ApplicativeF.init();
-    ApplicativeF.init();
-    NaturalGF.init();
-
     const ImplFG = CoproductApplicativeImpl(
         ApplicativeF.InstanceImpl,
         ApplicativeG.InstanceImpl,
@@ -1055,7 +1049,6 @@ const MaybeMonadImpl = struct {
 
 fn maybeSample() !void {
     const MaybeMonad = Monad(MaybeMonadImpl);
-    MaybeMonad.init();
 
     var maybe_a: ?u32 = 42;
     maybe_a = MaybeMonad.fmap(.InplaceMap, struct {
@@ -1362,7 +1355,6 @@ fn arraySample() !void {
     const ARRAY_LEN = 4;
     const ArrayF = Array(ARRAY_LEN);
     const ArrayMonad = Monad(ArrayMonadImpl(ARRAY_LEN));
-    ArrayMonad.init();
 
     var arr: ArrayF(u32) = undefined;
     var i: u32 = 0;
@@ -1472,7 +1464,6 @@ fn composeSample() !void {
     const MaybeApplicative = Applicative(MaybeMonadImpl);
 
     const ArrayMaybeApplicative = ComposeApplicative(ArrayApplicative, MaybeApplicative);
-    ArrayMaybeApplicative.init();
 
     var arr: ArrayF(Maybe(u32)) = undefined;
     var i: u32 = 0;
@@ -1607,7 +1598,6 @@ fn composeSample() !void {
     // std.debug.print("arr3_ints: {any}\n", .{arr3_ints});
 
     const ArrayMaybeArrayApplicative = ComposeApplicative(ArrayMaybeApplicative, ArrayApplicative);
-    ArrayMaybeArrayApplicative.init();
 
     const arr3_appried = ArrayMaybeArrayApplicative.fapply(u32, u32, arr3_fns, arr3_ints);
     std.debug.print("arr3_appried: ", .{});
@@ -1622,7 +1612,6 @@ fn productSample() !void {
     const MaybeApplicative = Applicative(MaybeMonadImpl);
 
     const ArrayAndMaybeApplicative = ProductApplicative(ArrayApplicative, MaybeApplicative);
-    ArrayAndMaybeApplicative.init();
 
     // pretty print the array maybe tuple with type { ArrayF(A), Maybe(A) }
     const prettyArrayAndMaybe = struct {
@@ -1695,7 +1684,6 @@ fn coproductSample() !void {
     const NatMaybeToArray = NatTrans(MaybeToArrayNatImply(ARRAY_LEN));
 
     const ArrayOrMaybeApplicative = CoproductApplicative(ArrayApplicative, MaybeApplicative, NatMaybeToArray);
-    ArrayOrMaybeApplicative.init();
 
     // pretty print the arr_or_maybe with type Coproduct(ArrayF, Maybe)
     const prettyArrayOrMaybe = struct {
