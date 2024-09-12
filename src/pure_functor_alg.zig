@@ -7,12 +7,12 @@ const std = @import("std");
 
 const assert = std.debug.assert;
 
-pub fn pureAlgSample() !void {
-    try maybeSample();
-    try arraySample();
-    try composeSample();
-    try productSample();
-    try coproductSample();
+pub fn pureAlgSample() void {
+    maybeSample();
+    arraySample();
+    composeSample();
+    productSample();
+    coproductSample();
 }
 
 /// A single-argument type function for type constructor
@@ -1047,7 +1047,7 @@ const MaybeMonadImpl = struct {
     }
 };
 
-fn maybeSample() !void {
+fn maybeSample() void {
     const MaybeMonad = Monad(MaybeMonadImpl);
 
     var maybe_a: ?u32 = 42;
@@ -1319,7 +1319,7 @@ fn getDefaultFn(comptime Fn: type) fn (MapFnInType(Fn)) MapFnRetType(Fn) {
     }.defaultFn;
 }
 
-pub fn MaybeToArrayNatImply(comptime len: usize) type {
+pub fn MaybeToArrayNatImpl(comptime len: usize) type {
     return struct {
         const F = Maybe;
         const G = Array(len);
@@ -1351,7 +1351,7 @@ pub fn ArrayToMaybeNatImpl(comptime len: usize) type {
     };
 }
 
-fn arraySample() !void {
+fn arraySample() void {
     const ARRAY_LEN = 4;
     const ArrayF = Array(ARRAY_LEN);
     const ArrayMonad = Monad(ArrayMonadImpl(ARRAY_LEN));
@@ -1457,7 +1457,7 @@ fn arraySample() !void {
     std.debug.print("comptime_binded: {any}\n", .{comptime_binded});
 }
 
-fn composeSample() !void {
+fn composeSample() void {
     const ARRAY_LEN = 4;
     const ArrayF = Array(ARRAY_LEN);
     const ArrayApplicative = Applicative(ArrayMonadImpl(ARRAY_LEN));
@@ -1604,7 +1604,7 @@ fn composeSample() !void {
     prettyPrintArr3(arr3_appried);
 }
 
-fn productSample() !void {
+fn productSample() void {
     const ARRAY_LEN = 4;
     const ArrayF = Array(ARRAY_LEN);
     const ArrayAndMaybe = productFG(ArrayF, Maybe);
@@ -1675,13 +1675,13 @@ fn productSample() !void {
     prettyArrayAndMaybe(arr_and_maybe_applied);
 }
 
-fn coproductSample() !void {
+fn coproductSample() void {
     const ARRAY_LEN = 4;
     const ArrayF = Array(ARRAY_LEN);
     const ArrayOrMaybe = coproductFG(ArrayF, Maybe);
     const ArrayApplicative = Applicative(ArrayMonadImpl(ARRAY_LEN));
     const MaybeApplicative = Applicative(MaybeMonadImpl);
-    const NatMaybeToArray = NatTrans(MaybeToArrayNatImply(ARRAY_LEN));
+    const NatMaybeToArray = NatTrans(MaybeToArrayNatImpl(ARRAY_LEN));
 
     const ArrayOrMaybeApplicative = CoproductApplicative(ArrayApplicative, MaybeApplicative, NatMaybeToArray);
 

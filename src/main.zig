@@ -32,7 +32,7 @@ pub fn main() !void {
     try misc.baseExample();
     try sd.simdSample();
     try funalg.algSample();
-    try pfunalg.pureAlgSample();
+    pfunalg.pureAlgSample();
 
     vecSortSample();
     try vqsortSample();
