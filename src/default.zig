@@ -24,7 +24,7 @@ pub fn Default(comptime DefaultInst: type, comptime T: type) type {
 /// is void.
 pub fn BaseNoneDefaultInst(comptime T: type) type {
     switch (@typeInfo(T)) {
-        .Type, .Void, .Bool, .Int, .Float, .Optional => return struct {
+        .type, .void, .bool, .int, .float, .optional => return struct {
             none: void,
 
             const Self = @This();
@@ -40,7 +40,7 @@ pub fn BaseNoneDefaultInst(comptime T: type) type {
 
 pub fn ArrayDefaultInst(comptime T: type) type {
     switch (@typeInfo(T)) {
-        .Array => return struct {
+        .array => return struct {
             none: void,
 
             const Self = @This();
@@ -56,7 +56,7 @@ pub fn ArrayDefaultInst(comptime T: type) type {
 
 pub fn VectorDefaultInst(comptime T: type) type {
     switch (@typeInfo(T)) {
-        .Vector => return struct {
+        .vector => return struct {
             none: void,
 
             const Self = @This();
@@ -73,7 +73,7 @@ pub fn VectorDefaultInst(comptime T: type) type {
 // The instance has none field that type is void
 pub fn DeriveNoneDefaultInst(comptime T: type) type {
     switch (@typeInfo(T)) {
-        .Struct => return struct {
+        .@"struct" => return struct {
             none: void,
 
             const Self = @This();
@@ -83,7 +83,7 @@ pub fn DeriveNoneDefaultInst(comptime T: type) type {
                 return defaultStructValue(T);
             }
         },
-        .Union => return struct {
+        .@"union" => return struct {
             none: void,
 
             const Self = @This();
@@ -93,7 +93,7 @@ pub fn DeriveNoneDefaultInst(comptime T: type) type {
                 return defaultUnionValue(T);
             }
         },
-        .Enum => return struct {
+        .@"enum" => return struct {
             none: void,
 
             const Self = @This();
@@ -111,38 +111,38 @@ const MAX_LOCAL_ARRAY_LEN = 2048;
 
 fn defaultArrayValue(comptime T: type) T {
     const info = @typeInfo(T);
-    if (info.Array.len > MAX_LOCAL_ARRAY_LEN) {
+    if (info.array.len > MAX_LOCAL_ARRAY_LEN) {
         @compileError("The length of array too large to create array");
     }
 
-    var array: [info.Array.len]info.Array.child = undefined;
+    var array: [info.array.len]info.array.child = undefined;
     comptime var i = 0;
-    inline while (i < info.Array.len) : (i += 1) {
-        array[i] = defaultValueOfType(info.Array.child);
+    inline while (i < info.array.len) : (i += 1) {
+        array[i] = defaultValueOfType(info.array.child);
     }
     return array;
 }
 
 fn defaultVectorValue(comptime T: type) T {
     const info = @typeInfo(T);
-    if (info.Vector.len > MAX_LOCAL_ARRAY_LEN) {
+    if (info.vector.len > MAX_LOCAL_ARRAY_LEN) {
         @compileError("The length of vector too large to create vector");
     }
 
-    var array: [info.Vector.len]info.Vector.child = undefined;
+    var array: [info.vector.len]info.vector.child = undefined;
     comptime var i = 0;
-    inline while (i < info.Vector.len) : (i += 1) {
-        array[i] = defaultValueOfType(info.Vector.child);
+    inline while (i < info.vector.len) : (i += 1) {
+        array[i] = defaultValueOfType(info.vector.child);
     }
     return array;
 }
 
 fn defaultPointerValue(comptime T: type) T {
-    const info = @typeInfo(T).Pointer;
+    const info = @typeInfo(T).pointer;
     switch (info.size) {
-        .Slice => {
-            if (info.sentinel) |sentinel| {
-                const p: *info.child = @constCast(@ptrCast(sentinel));
+        .slice => {
+            if (info.sentinel_ptr) |sentinel_ptr| {
+                const p: *info.child = @constCast(@ptrCast(sentinel_ptr));
                 const array = [_]info.child{p.*};
                 return @constCast(@ptrCast(array[0..]));
             } else {
@@ -156,7 +156,7 @@ fn defaultPointerValue(comptime T: type) T {
 
 fn defaultStructValue(comptime T: type) T {
     var val: T = undefined;
-    const info = @typeInfo(T).Struct;
+    const info = @typeInfo(T).@"struct";
     inline for (info.fields) |field_info| {
         @field(val, field_info.name) = defaultValueOfType(field_info.type);
     }
@@ -165,7 +165,7 @@ fn defaultStructValue(comptime T: type) T {
 }
 
 fn defaultUnionValue(comptime T: type) T {
-    const info = @typeInfo(T).Union;
+    const info = @typeInfo(T).@"union";
     return @unionInit(T, info.fields[0].name, defaultValueOfType(info.fields[0].type));
 }
 
@@ -175,17 +175,17 @@ fn defaultEnumValue(comptime T: type) T {
 
 inline fn defaultValueOfType(comptime T: type) T {
     return switch (@typeInfo(T)) {
-        .Type => void,
-        .Void => {},
-        .Bool => false,
-        .Int, .Float => @as(T, 0),
-        .Optional => @as(T, null),
-        .Array => defaultArrayValue(T),
-        .Vector => defaultVectorValue(T),
-        .Pointer => defaultPointerValue(T),
-        .Struct => defaultStructValue(T),
-        .Union => defaultUnionValue(T),
-        .Enum => defaultEnumValue(T),
+        .type => void,
+        .void => {},
+        .bool => false,
+        .int, .float => @as(T, 0),
+        .optional => @as(T, null),
+        .array => defaultArrayValue(T),
+        .vector => defaultVectorValue(T),
+        .pointer => defaultPointerValue(T),
+        .@"struct" => defaultStructValue(T),
+        .@"union" => defaultUnionValue(T),
+        .@"enum" => defaultEnumValue(T),
         else => @compileError("default field value not support type: " ++ @typeName(T)),
     };
 }

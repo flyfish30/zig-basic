@@ -186,8 +186,8 @@ pub fn shiftRightVec(comptime T: type, vec: @Vector(VecLen(T), T), count: Vector
     comptime var bit_count: usize = undefined;
 
     bit_count = switch (@typeInfo(T)) {
-        .Int => |info| info.bits,
-        .Float => |info| info.bits,
+        .int => |info| info.bits,
+        .float => |info| info.bits,
         else => @compileError("shiftRightVec not support type: " ++ @typeName(T)),
     };
 
@@ -218,8 +218,8 @@ pub fn shiftLeftVec(comptime T: type, vec: @Vector(VecLen(T), T), count: VectorI
     comptime var bit_count: usize = undefined;
 
     bit_count = switch (@typeInfo(T)) {
-        .Int => |info| info.bits,
-        .Float => |info| info.bits,
+        .int => |info| info.bits,
+        .float => |info| info.bits,
         else => @compileError("shiftLeftVec not support type: " ++ @typeName(T)),
     };
 

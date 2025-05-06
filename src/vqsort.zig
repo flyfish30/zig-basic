@@ -118,8 +118,8 @@ fn sortRowsN(comptime N_ROW: usize, comptime T: type, buf: []T, num: usize, comp
     const asc_idx = std.simd.iota(usize, N);
     const mask = asc_idx < @as(@Vector(N, u16), @splat(@intCast(num_irreg)));
     const pad = switch (@typeInfo(T)) {
-        .Int, .ComptimeInt => std.math.maxInt(T),
-        .Float, .ComptimeFloat => std.math.floatMax,
+        .int, .comptime_int => std.math.maxInt(T),
+        .float, .comptime_float => std.math.floatMax,
         else => @compileError("bad type"),
     };
     const pad_vec: @Vector(N, T) = @splat(pad);
@@ -226,8 +226,8 @@ fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T, com
         if (num_irreg > 0) {
             const part_mask = simd.maskFirstN(T, num_irreg);
             const pad = switch (@typeInfo(T)) {
-                .Int, .ComptimeInt => std.math.maxInt(T),
-                .Float, .ComptimeFloat => std.math.floatMax,
+                .int, .comptime_int => std.math.maxInt(T),
+                .float, .comptime_float => std.math.floatMax,
                 else => @compileError("bad type"),
             };
             const pad_vec: @Vector(VecLen(T), T) = @splat(pad);
@@ -384,8 +384,8 @@ fn partition(comptime T: type, buf: []T, start: usize, num: usize, pivot: T, com
     if (num_irreg > 0) {
         const part_mask = simd.maskFirstN(T, num_irreg);
         const pad = switch (@typeInfo(T)) {
-            .Int, .ComptimeInt => std.math.maxInt(T),
-            .Float, .ComptimeFloat => std.math.floatMax,
+            .int, .comptime_int => std.math.maxInt(T),
+            .float, .comptime_float => std.math.floatMax,
             else => @compileError("bad type"),
         };
         const pad_vec: @Vector(VecLen(T), T) = @splat(pad);

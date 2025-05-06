@@ -19,17 +19,17 @@ pub fn pureAlgSample() void {
 pub const TCtor = fn (comptime type) type;
 
 fn MapFnInType(comptime MapFn: type) type {
-    const len = @typeInfo(MapFn).Fn.params.len;
+    const len = @typeInfo(MapFn).@"fn".params.len;
 
     if (len != 1) {
         @compileError("The map function must has only one parameter!");
     }
 
-    return @typeInfo(MapFn).Fn.params[0].type.?;
+    return @typeInfo(MapFn).@"fn".params[0].type.?;
 }
 
 fn MapFnRetType(comptime MapFn: type) type {
-    const R = @typeInfo(MapFn).Fn.return_type.?;
+    const R = @typeInfo(MapFn).@"fn".return_type.?;
 
     if (R == noreturn) {
         @compileError("The return type of map function must not be noreturn!");
@@ -39,31 +39,31 @@ fn MapFnRetType(comptime MapFn: type) type {
 
 fn MapLamInType(comptime MapLam: type) type {
     const info = @typeInfo(MapLam);
-    if (info != .Struct) {
+    if (info != .@"struct") {
         @compileError("The map lambda must be a struct!");
     }
 
     const mapFnInfo = @typeInfo(@TypeOf(MapLam.call));
-    const len = mapFnInfo.Fn.params.len;
+    const len = mapFnInfo.@"fn".params.len;
 
     if (len != 2) {
         @compileError("The call function of map lambda must have only two parameters!");
     }
-    if (mapFnInfo.Fn.params[0].type.? != *MapLam and mapFnInfo.Fn.params[0].type.? != *const MapLam) {
+    if (mapFnInfo.@"fn".params[0].type.? != *MapLam and mapFnInfo.@"fn".params[0].type.? != *const MapLam) {
         @compileError("The first parameter of call function must be a pointer of MapLam!");
     }
 
-    return mapFnInfo.Fn.params[1].type.?;
+    return mapFnInfo.@"fn".params[1].type.?;
 }
 
 fn MapLamRetType(comptime MapLam: type) type {
     const info = @typeInfo(MapLam);
-    if (info != .Struct) {
+    if (info != .@"struct") {
         @compileError("The map lambda must be a struct!");
     }
 
     const mapFnInfo = @typeInfo(@TypeOf(MapLam.call));
-    const R = mapFnInfo.Fn.return_type.?;
+    const R = mapFnInfo.@"fn".return_type.?;
 
     if (R == noreturn) {
         @compileError("The return type of call function must not be noreturn!");
@@ -552,11 +552,10 @@ pub fn ComposeApplicativeImpl(comptime ImplF: type, comptime ImplG: type) type {
                 fn fapply(
                     gf_p: *ImplG.F(FnOrLambdaType),
                 ) ApplyLam {
-                    const apply_lam = .{
+                    // apply lambda \ga -> fapply instanceG gf ga : G a -> G b
+                    return ApplyLam{
                         .apply_gf_p = gf_p,
                     };
-                    // apply lambda \ga -> fapply instanceG gf ga : G a -> G b
-                    return apply_lam;
                 }
             };
 
@@ -606,11 +605,11 @@ pub fn productFG(comptime F: TCtor, comptime G: TCtor) TCtor {
 /// Get tuple of left and right type of product
 pub fn getProductTypeTuple(comptime P: type) struct { type, type } {
     const info = @typeInfo(P);
-    comptime assert(info == .Struct and info.Struct.is_tuple == true);
-    comptime assert(info.Struct.fields.len == 2);
+    comptime assert(info == .@"struct" and info.@"struct".is_tuple == true);
+    comptime assert(info.@"struct".fields.len == 2);
 
-    const l_type = info.Struct.fields[0].type;
-    const r_type = info.Struct.fields[1].type;
+    const l_type = info.@"struct".fields[0].type;
+    const r_type = info.@"struct".fields[1].type;
     return .{ l_type, r_type };
 }
 
@@ -755,11 +754,11 @@ pub fn coproductFG(comptime F: TCtor, comptime G: TCtor) TCtor {
 /// Get tuple of left and right type of coproduct
 pub fn getCoproductTypeTuple(comptime U: type) struct { type, type } {
     const info = @typeInfo(U);
-    comptime assert(info == .Union);
-    comptime assert(info.Union.fields.len == 2);
+    comptime assert(info == .@"union");
+    comptime assert(info.@"union".fields.len == 2);
 
-    const l_type = info.Union.fields[0].type;
-    const r_type = info.Union.fields[1].type;
+    const l_type = info.@"union".fields[0].type;
+    const r_type = info.@"union".fields[1].type;
     return .{ l_type, r_type };
 }
 
@@ -922,7 +921,7 @@ pub fn CoproductApplicative(
 
 fn castInplaceValue(comptime T: type, val: anytype) T {
     const info = @typeInfo(@TypeOf(val));
-    if (info == .Optional) {
+    if (info == .optional) {
         const v = val orelse return null;
         const retv: std.meta.Child(T) = @bitCast(v);
         return retv;
@@ -1329,9 +1328,9 @@ pub fn MaybeToArrayNatImpl(comptime len: usize) type {
                 return [1]A{a} ** len;
             } else {
                 const info_a = @typeInfo(A);
-                if (info_a == .Fn) {
+                if (info_a == .@"fn") {
                     return [1]A{getDefaultFn(A)} ** len;
-                } else if (info_a == .Pointer and @typeInfo(std.meta.Child(A)) == .Fn) {
+                } else if (info_a == .pointer and @typeInfo(std.meta.Child(A)) == .@"fn") {
                     return [1]A{getDefaultFn(std.meta.Child(A))} ** len;
                 }
                 return std.mem.zeroes([len]A);

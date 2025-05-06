@@ -56,8 +56,10 @@ fn packSelectGeneric(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), boo
             vec_lane[count0..][0 .. vecLen / 2].* = vec1_pair[0];
             vec_lane[vecLen * 3 / 2 .. vecLen * 2].* = vec1_pair[1];
             vec_lane[vecLen + count1 ..][0 .. vecLen / 2].* = vec0_pair[1];
-            return .{ @bitCast(std.simd.extract(vec_lane, 0, vecLen)),
-                      @bitCast(std.simd.extract(vec_lane, vecLen, vecLen)) };
+            return .{
+                @bitCast(std.simd.extract(vec_lane, 0, vecLen)),
+                @bitCast(std.simd.extract(vec_lane, vecLen, vecLen)),
+            };
         },
         else => @compileError(std.fmt.comptimePrint("packSelectLeftGeneric can not support {d} bits vector", .{VEC_BITS_LEN})),
     }
@@ -88,8 +90,10 @@ fn packSelectVec128(vec: anytype, mask: @Vector(vectorLength(@TypeOf(vec)), bool
             vec_lane[count0..][0 .. vecLen / 2].* = vec1;
             vec_lane[vecLen * 3 / 2 .. vecLen * 2].* = vec1;
             vec_lane[vecLen + count1 ..][0 .. vecLen / 2].* = vec0;
-            return .{ @bitCast(std.simd.extract(vec_lane, 0, vecLen)),
-                      @bitCast(std.simd.extract(vec_lane, vecLen, vecLen)) };
+            return .{
+                @bitCast(std.simd.extract(vec_lane, 0, vecLen)),
+                @bitCast(std.simd.extract(vec_lane, vecLen, vecLen)),
+            };
         },
         16, 32, 64 => {
             const mask_u: u64 = @as(std.meta.Int(.unsigned, vecLen), @bitCast(mask));
@@ -156,7 +160,7 @@ const table8x8: [256 * 8]u8 align(16) = table8x8_indices: {
 // narrow to hold all bits, and unpacking nibbles is likely more costly than
 // the higher cache footprint from storing bytes.
 const table16x8: [256 * 8]u8 align(16) = table16x8_indices: {
-    var indices: @Vector(256 * 8, u8) = table8x8[0.. 256 * 8].*;
+    var indices: @Vector(256 * 8, u8) = table8x8[0 .. 256 * 8].*;
     indices *= @splat(2);
     break :table16x8_indices indices;
 };
@@ -190,48 +194,18 @@ fn idxFromBits128(comptime T: type, mask_bits: u64) @Vector(16, u8) {
         2 => {
             // TODO: It is only tested in little-endian, it should to verify it
             // in big-endian
-            const byte_idx: @Vector(8, u8) = table16x8[@intCast(mask_bits * 8) ..][0..8].*;
+            const byte_idx: @Vector(8, u8) = table16x8[@intCast(mask_bits * 8)..][0..8].*;
             switch (native_endian) {
                 .little => return @bitCast(std.simd.interlace(.{ byte_idx, byte_idx + @as(@Vector(8, u8), @splat(1)) })),
                 .big => return @bitCast(std.simd.interlace(.{ byte_idx + @as(@Vector(8, u8), @splat(1)), byte_idx })),
             }
         },
         4 => {
-            return indices32x4[@intCast(mask_bits * 16) ..][0..16].*;
+            return indices32x4[@intCast(mask_bits * 16)..][0..16].*;
         },
         8 => {
-            return indices64x2[@intCast(mask_bits * 16) ..][0..16].*;
+            return indices64x2[@intCast(mask_bits * 16)..][0..16].*;
         },
         else => @compileError("Invalid type for idxFromBits" ++ @typeName(T)),
     }
 }
-
-//	uint64_t index_masks[6] = {
-//		0xaaaaaaaaaaaaaaaa,
-//		0xcccccccccccccccc,
-//		0xf0f0f0f0f0f0f0f0,
-//		0xff00ff00ff00ff00,
-//		0xffff0000ffff0000,
-//		0xffffffff00000000,
-//	};
-//
-//	const __m512i index_bits[6] = {
-//		_mm512_set1_epi8(1),
-//		_mm512_set1_epi8(2),
-//		_mm512_set1_epi8(4),
-//		_mm512_set1_epi8(8),
-//		_mm512_set1_epi8(16),
-//		_mm512_set1_epi8(32),
-//	};
-//		if (mask) {
-//			//len = 64 - __builtin_popcountll(mask);
-//			len = 64 - _mm_popcnt_u64(mask);
-//			mask = ~mask;
-//			__m512i indices = _mm512_set1_epi8(0);
-//			for (size_t index = 0; index < 6; index++) {
-//				uint64_t m = _pext_u64(index_masks[index], mask);
-//				indices = _mm512_mask_add_epi8(indices, m, indices, index_bits[index]);
-//			}
-//
-//			output = _mm512_permutexvar_epi8(indices, input);
-//		}

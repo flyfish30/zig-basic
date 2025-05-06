@@ -49,7 +49,7 @@ fn vecSortSample() void {
     const IntType = u8;
     const N = comptime VecLen(IntType);
     const N_VECS = 16;
-    var prnd = std.rand.DefaultPrng.init(83754737);
+    var prnd = std.Random.DefaultPrng.init(83754737);
     var array_int: [N * N_VECS]IntType = undefined;
     for (&array_int) |*a| {
         a.* = prnd.random().int(IntType);
@@ -76,7 +76,7 @@ fn vecSortSample() void {
 
 fn vqsortSample() !void {
     const IntType = u8;
-    var prnd = std.rand.DefaultPrng.init(83751737);
+    var prnd = std.Random.DefaultPrng.init(83751737);
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();

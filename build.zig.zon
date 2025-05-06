@@ -1,6 +1,8 @@
 .{
-    .name = "basic-example",
+    .name = .basic_example,
     .version = "0.1.0",
+    .fingerprint = 0x82760a52405938e4,
+    .minium_zig_version = "0,14.0",
     .dependencies = .{
         .zstbi = .{ .path = "libs/zstbi" },
     },

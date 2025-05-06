@@ -34,8 +34,8 @@ pub fn VecType(comptime T: type) type {
 
 pub fn vectorLength(comptime VectorType: type) comptime_int {
     return switch (@typeInfo(VectorType)) {
-        .Vector => |info| info.len,
-        .Array => |info| info.len,
+        .vector => |info| info.len,
+        .array => |info| info.len,
         else => @compileError("Invalid type " ++ @typeName(VectorType)),
     };
 }
@@ -57,9 +57,9 @@ fn CopyPtrAttrs(
     comptime size: std.builtin.Type.Pointer.Size,
     comptime child: type,
 ) type {
-    const info = @typeInfo(source).Pointer;
+    const info = @typeInfo(source).pointer;
     return @Type(.{
-        .Pointer = .{
+        .pointer = .{
             .size = size,
             .is_const = info.is_const,
             .is_volatile = info.is_volatile,
@@ -67,14 +67,14 @@ fn CopyPtrAttrs(
             .alignment = info.alignment,
             .address_space = info.address_space,
             .child = child,
-            .sentinel = null,
+            .sentinel_ptr = null,
         },
     });
 }
 
 fn AsSliceReturnType(comptime T: type, comptime P: type) type {
     const size = @sizeOf(std.meta.Child(P));
-    return CopyPtrAttrs(P, .One, [size / @sizeOf(T)]T);
+    return CopyPtrAttrs(P, .one, [size / @sizeOf(T)]T);
 }
 
 /// Given a pointer to a single item, returns a slice of the underlying type, preserving pointer attributes.
@@ -84,7 +84,7 @@ pub fn asSlice(comptime T: type, ptr: anytype) AsSliceReturnType(T, @TypeOf(ptr)
 
 pub fn isBitsPackedLeft(int_mask: anytype) bool {
     const info = @typeInfo(@TypeOf(int_mask));
-    if (!(info == .Int or
+    if (!(info == .int or
         info == .Comptime_Int))
     {
         @compileError("The int_mask not a int type");
